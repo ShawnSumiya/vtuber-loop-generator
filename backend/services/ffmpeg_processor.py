@@ -61,6 +61,8 @@ class VideoProcessor:
         input_height = self.get_video_height(input_path)
         if input_height > 0:
             print(f"--- PROCESS: 入力動画の高さ = {input_height}px ---")
+        # tpad が速度変更後に正しく duration を解釈するために FPS を取得
+        input_fps = self.get_video_fps(input_path)
 
         # サーバーリソース制限: Original 選択でも入力が 720 超の場合は 720p に制限（OOM 防止）
         if target_resolution == "Original" and input_height > 720:
@@ -79,6 +81,7 @@ class VideoProcessor:
                 end_pause_seconds,
                 target_resolution,
                 speed,
+                input_fps,
             )
         elif mode == LoopMode.PINGPONG:
             await asyncio.to_thread(
@@ -92,6 +95,7 @@ class VideoProcessor:
                 target_resolution,
                 input_height,
                 speed,
+                input_fps,
             )
         elif mode == LoopMode.CROSSFade:
             await asyncio.to_thread(
@@ -155,6 +159,34 @@ class VideoProcessor:
             return int(result.stdout.strip())
         except ValueError:
             return 0
+
+    def get_video_fps(self, path: Path) -> float:
+        """ffprobe で動画のフレームレートを取得。r_frame_rate から計算。取得失敗時は 30.0 を返す。"""
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=r_frame_rate",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(path),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0 or not result.stdout.strip():
+            return 30.0
+        try:
+            # r_frame_rate は "30/1" や "30000/1001" 形式
+            frac = result.stdout.strip()
+            if "/" in frac:
+                num, den = frac.split("/", 1)
+                n, d = float(num), float(den)
+                return n / d if d > 0 else 30.0
+            return float(frac)
+        except (ValueError, ZeroDivisionError):
+            return 30.0
 
     # ターミナルに赤文字でエラーを表示するためのANSIコード
     _RED = "\033[91m"
@@ -231,6 +263,7 @@ class VideoProcessor:
         end_pause_seconds: float = 0.0,
         target_resolution: str = "Original",
         speed: float = 1.0,
+        input_fps: float = 30.0,
     ) -> None:
         """単純な繰り返しループ。tpad フィルタで静止時間を追加。映像のみ処理し、出力は無音。"""
         print("--- SIMPLE_LOOP: 開始 ---")
@@ -250,6 +283,9 @@ class VideoProcessor:
             pts_expr = f"{1.0 / speed}*PTS"
             print(f"--- SIMPLE_LOOP: 速度変更適用 ({speed}x) ---")
             stream_v = stream_resized.filter("setpts", pts_expr)
+            # tpad が正しく duration（秒）を解釈するため fps を明示（速度変更で FPS が変わる）
+            out_fps = max(1, round(input_fps * speed))
+            stream_v = stream_v.filter("fps", fps=out_fps)
         else:
             stream_v = stream_resized
 
@@ -274,19 +310,23 @@ class VideoProcessor:
             self.run_ffmpeg_safe(out_stream, paused_video)
             loop_source = paused_video
         else:
-            # リサイズのみ適用した場合は一時ファイルに書き出してからループ
+            # リサイズ or 速度変更を適用した場合は一時ファイルに書き出してからループ
             scale_height = self._scale_height_from_resolution(target_resolution)
-            if target_resolution != "Original" and scale_height is not None:
-                scaled_only = self.temp_dir / f"scaled_{input_path.stem}.mp4"
+            needs_encode = (
+                (target_resolution != "Original" and scale_height is not None)
+                or speed != 1.0
+            )
+            if needs_encode:
+                temp_for_loop = self.temp_dir / f"prepared_{input_path.stem}.mp4"
                 out_stream = ffmpeg.output(
                     stream_v,
-                    str(scaled_only),
+                    str(temp_for_loop),
                     vcodec="libx264",
                     preset="ultrafast",
                     crf=18,
                 )
-                self.run_ffmpeg_safe(out_stream, scaled_only)
-                loop_source = scaled_only
+                self.run_ffmpeg_safe(out_stream, temp_for_loop)
+                loop_source = temp_for_loop
             else:
                 loop_source = input_path
 
@@ -321,6 +361,7 @@ class VideoProcessor:
         target_resolution: str = "Original",
         input_height: int = 0,
         speed: float = 1.0,
+        input_fps: float = 30.0,
     ) -> None:
         """シンプルなPing-Pongループ。映像のみ処理し、出力は無音。
         
@@ -353,6 +394,9 @@ class VideoProcessor:
             pts_expr = f"{1.0 / speed}*PTS"
             print(f"--- PINGPONG_LOOP: 速度変更適用 ({speed}x) ---")
             stream_v = stream_resized.filter("setpts", pts_expr)
+            # tpad が正しく duration（秒）を解釈するため fps を明示（速度変更で FPS が変わる）
+            out_fps = max(1, round(input_fps * speed))
+            stream_v = stream_v.filter("fps", fps=out_fps)
         else:
             stream_v = stream_resized
 
