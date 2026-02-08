@@ -6,6 +6,8 @@ type LoopMode = "simple" | "pingpong" | "crossfade";
 
 type Resolution = "Original" | "720p";
 
+type PlaybackSpeed = 0.5 | 1 | 2;
+
 interface SettingsPanelProps {
   durationSeconds: number;
   onDurationChange: (value: number) => void;
@@ -19,6 +21,8 @@ interface SettingsPanelProps {
   onEndPauseChange: (value: number) => void;
   resolution: Resolution;
   onResolutionChange: (value: Resolution) => void;
+  playbackSpeed: PlaybackSpeed;
+  onPlaybackSpeedChange: (value: PlaybackSpeed) => void;
   disabled: boolean;
 }
 
@@ -35,6 +39,8 @@ export default function SettingsPanel({
   onEndPauseChange,
   resolution,
   onResolutionChange,
+  playbackSpeed,
+  onPlaybackSpeedChange,
   disabled,
 }: SettingsPanelProps) {
   const formatDuration = (seconds: number): string => {
@@ -211,6 +217,26 @@ export default function SettingsPanel({
         </select>
         <p className="mt-1.5 text-xs text-muted-foreground">
           高解像度の動画はサーバー制限のため 720p に制限して出力されます。
+        </p>
+      </div>
+
+      {/* 再生速度 */}
+      <div>
+        <label className="block text-sm font-medium mb-2">
+          再生速度 (Playback Speed)
+        </label>
+        <select
+          value={playbackSpeed}
+          onChange={(e) => onPlaybackSpeedChange(Number(e.target.value) as PlaybackSpeed)}
+          disabled={disabled}
+          className="w-full px-3 py-2 bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <option value={0.5}>0.5倍速（スロー）</option>
+          <option value={1}>1倍速（通常）</option>
+          <option value={2}>2倍速</option>
+        </select>
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          出力動画の再生速度を変更します。0.5倍速は尺が2倍になり、メモリ消費が増えます。
         </p>
       </div>
 

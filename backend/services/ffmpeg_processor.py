@@ -31,10 +31,13 @@ class VideoProcessor:
         start_pause_seconds: float = 0.0,
         end_pause_seconds: float = 0.0,
         target_resolution: str = "Original",
+        speed: float = 1.0,
     ) -> Path:
         """モードに応じて動画をループ加工し、出力ファイルパスを返す。"""
         # 解像度を正規化（フロント未送信・不正値でも止まらないようにする）
         target_resolution = self._normalize_resolution(target_resolution)
+        # 速度を正規化（0.5, 1.0, 2.0 のみ許可、不正値は 1.0 にフォールバック）
+        speed = self._normalize_speed(speed)
         print("--- PROCESS: 処理開始 ---")
         self.temp_dir.mkdir(exist_ok=True, parents=True)
         output_path = self.temp_dir / f"output_{input_path.stem}_{mode.value}.mp4"
@@ -45,8 +48,13 @@ class VideoProcessor:
             raise RuntimeError("Could not determine input video duration")
         print(f"--- PROCESS: 入力動画の長さ = {base_duration}秒 ---")
 
-        # 必要ループ回数を計算
-        loops = max(1, math.ceil(target_duration / base_duration))
+        # 速度変更後の実効尺（0.5倍速で2倍に、2倍速で0.5倍になる）
+        effective_duration = base_duration / speed
+        if speed != 1.0:
+            print(f"--- PROCESS: 再生速度 = {speed}x、実効尺 = {effective_duration:.2f}秒 ---")
+
+        # 必要ループ回数は「速度変更後の動画」を基準に計算
+        loops = max(1, math.ceil(target_duration / effective_duration))
         print(f"--- PROCESS: ループ回数 = {loops}回 ---")
 
         # 入力解像度（高さ）を取得。ダウンスケール時は「先に縮小してから処理」するために使用
@@ -70,6 +78,7 @@ class VideoProcessor:
                 start_pause_seconds,
                 end_pause_seconds,
                 target_resolution,
+                speed,
             )
         elif mode == LoopMode.PINGPONG:
             await asyncio.to_thread(
@@ -82,6 +91,7 @@ class VideoProcessor:
                 end_pause_seconds,
                 target_resolution,
                 input_height,
+                speed,
             )
         elif mode == LoopMode.CROSSFade:
             await asyncio.to_thread(
@@ -91,9 +101,10 @@ class VideoProcessor:
                 target_duration,
                 loops,
                 crossfade_seconds,
-                base_duration,
+                effective_duration,  # 速度変更後のクリップ長（xfade offset 計算用）
                 target_resolution,
                 input_height,
+                speed,
             )
         else:
             raise ValueError(f"Unsupported loop mode: {mode}")
@@ -158,6 +169,18 @@ class VideoProcessor:
             return r
         return "Original"
 
+    def _normalize_speed(self, speed: Optional[float]) -> float:
+        """再生速度を正規化。0.5, 1.0, 2.0 のみ許可。不正値は 1.0 にフォールバック。"""
+        if speed is None:
+            return 1.0
+        try:
+            s = float(speed)
+            if s in (0.5, 1.0, 2.0):
+                return s
+        except (TypeError, ValueError):
+            pass
+        return 1.0
+
     def _scale_height_from_resolution(self, resolution: str) -> Optional[int]:
         """解像度文字列から高さを返す。例: '1080p' -> 1080, '4K' -> 2160。"""
         return {"720p": 720, "1080p": 1080, "4K": 2160}.get(resolution)
@@ -207,6 +230,7 @@ class VideoProcessor:
         start_pause_seconds: float = 0.0,
         end_pause_seconds: float = 0.0,
         target_resolution: str = "Original",
+        speed: float = 1.0,
     ) -> None:
         """単純な繰り返しループ。tpad フィルタで静止時間を追加。映像のみ処理し、出力は無音。"""
         print("--- SIMPLE_LOOP: 開始 ---")
@@ -218,8 +242,16 @@ class VideoProcessor:
             scale_height = self._scale_height_from_resolution(target_resolution)
             if scale_height is not None:
                 print(f"--- SIMPLE_LOOP: リサイズ適用 ({target_resolution} -> 高さ{scale_height}) ---")
-                # 幅は -2（アスペクト比維持・2の倍数）、高さを指定。文字列で渡してエスケープ不具合を防ぐ
                 stream_v = stream_v.filter("scale", "-2", str(scale_height))
+        stream_resized = stream_v
+
+        # リサイズ直後に速度変更を適用（setpts: 0.5倍速=2*PTS, 2倍速=0.5*PTS）
+        if speed != 1.0:
+            pts_expr = f"{1.0 / speed}*PTS"
+            print(f"--- SIMPLE_LOOP: 速度変更適用 ({speed}x) ---")
+            stream_v = stream_resized.filter("setpts", pts_expr)
+        else:
+            stream_v = stream_resized
 
         # 静止時間を追加する場合は tpad を適用
         if start_pause_seconds > 0 or end_pause_seconds > 0:
@@ -288,6 +320,7 @@ class VideoProcessor:
         end_pause_seconds: float = 0.0,
         target_resolution: str = "Original",
         input_height: int = 0,
+        speed: float = 1.0,
     ) -> None:
         """シンプルなPing-Pongループ。映像のみ処理し、出力は無音。
         
@@ -313,6 +346,15 @@ class VideoProcessor:
         stream_v = input_video["v"]
         if scale_first:
             stream_v = stream_v.filter("scale", "-2", str(scale_height))
+        stream_resized = stream_v
+
+        # リサイズ直後に速度変更を適用（setpts）
+        if speed != 1.0:
+            pts_expr = f"{1.0 / speed}*PTS"
+            print(f"--- PINGPONG_LOOP: 速度変更適用 ({speed}x) ---")
+            stream_v = stream_resized.filter("setpts", pts_expr)
+        else:
+            stream_v = stream_resized
 
         # ストリームA: Forward パート（先頭・末尾に tpad）
         print("--- PINGPONG_LOOP: ストリームA生成開始 ---")
@@ -411,8 +453,10 @@ class VideoProcessor:
         clip_duration: float,
         target_resolution: str = "Original",
         input_height: int = 0,
+        speed: float = 1.0,
     ) -> None:
         """前後をクロスフェードさせたシームレスループ。映像のみ処理し、出力は無音。
+        clip_duration は速度変更後の実効尺（xfade offset 計算用）。
         4K→720p などダウンスケールの場合は先に縮小してから xfade（メモリ節約）。そうでなければ xfade 後に scale。
         """
         print("--- CROSSFADE_LOOP: 開始 ---")
@@ -434,6 +478,15 @@ class VideoProcessor:
         v = stream["v"]
         if scale_first:
             v = v.filter("scale", "-2", str(scale_height))
+        stream_resized = v
+
+        # リサイズ直後に速度変更を適用（setpts）
+        if speed != 1.0:
+            pts_expr = f"{1.0 / speed}*PTS"
+            print(f"--- CROSSFADE_LOOP: 速度変更適用 ({speed}x) ---")
+            v = stream_resized.filter("setpts", pts_expr)
+        else:
+            v = stream_resized
 
         v_split = v.filter_multi_output("split", 2)
         v0 = v_split.stream(0).filter("format", "yuv420p").filter("setsar", "1")

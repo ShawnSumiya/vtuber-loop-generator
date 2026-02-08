@@ -8,6 +8,7 @@ import VideoPreview from "@/components/VideoPreview";
 
 type LoopMode = "simple" | "pingpong" | "crossfade";
 type Resolution = "Original" | "720p";
+type PlaybackSpeed = 0.5 | 1 | 2;
 
 export default function Home() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -17,6 +18,7 @@ export default function Home() {
   const [startPauseSeconds, setStartPauseSeconds] = useState<number>(0);
   const [endPauseSeconds, setEndPauseSeconds] = useState<number>(0);
   const [resolution, setResolution] = useState<Resolution>("Original");
+  const [playbackSpeed, setPlaybackSpeed] = useState<PlaybackSpeed>(1);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [processedVideoUrl, setProcessedVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +59,7 @@ export default function Home() {
       formData.append("start_pause_seconds", startPauseSeconds.toString());
       formData.append("end_pause_seconds", endPauseSeconds.toString());
       formData.append("resolution", resolution);
+      formData.append("speed", playbackSpeed.toString());
 
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
       const response = await fetch(`${API_BASE_URL}/process-video`, {
@@ -87,7 +90,7 @@ export default function Home() {
       clearTimeout(timeoutId);
       setIsProcessing(false);
     }
-  }, [selectedFile, durationSeconds, loopMode, crossfadeSeconds, startPauseSeconds, endPauseSeconds, resolution]);
+  }, [selectedFile, durationSeconds, loopMode, crossfadeSeconds, startPauseSeconds, endPauseSeconds, resolution, playbackSpeed]);
 
   const handleDownload = useCallback(() => {
     if (!processedVideoUrl || !selectedFile) return;
@@ -149,6 +152,8 @@ export default function Home() {
                 onEndPauseChange={setEndPauseSeconds}
                 resolution={resolution}
                 onResolutionChange={setResolution}
+                playbackSpeed={playbackSpeed}
+                onPlaybackSpeedChange={setPlaybackSpeed}
                 disabled={isProcessing || !selectedFile}
               />
             </div>

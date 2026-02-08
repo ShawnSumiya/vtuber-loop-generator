@@ -42,6 +42,7 @@ async def process_video(
     start_pause_seconds: float = Form(0.0),
     end_pause_seconds: float = Form(0.0),
     resolution: str = Form(default="Original"),
+    speed: float = Form(1.0),
 ):
     """アップロードされた動画を指定のモードでループ処理する。"""
     # 解像度が未送信・空・不正値の場合は Original として扱う（解像度を変えても止まらない）
@@ -78,6 +79,7 @@ async def process_video(
             start_pause_seconds=start_pause_seconds,
             end_pause_seconds=end_pause_seconds,
             target_resolution=resolution,
+            speed=speed,
         )
     except Exception as e:
         # 失敗時も入力ファイルは削除
