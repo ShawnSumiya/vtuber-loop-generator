@@ -111,17 +111,6 @@ class VideoProcessor:
         except ValueError as e:
             raise RuntimeError("Invalid duration from ffprobe") from e
 
-    def has_audio_stream(self, path: Path) -> bool:
-        """ffmpeg.probe を使って動画に音声ストリームがあるか確認。"""
-        try:
-            probe = ffmpeg.probe(str(path))
-            streams = probe.get("streams", [])
-            return any(stream.get("codec_type") == "audio" for stream in streams)
-        except Exception as e:
-            # プローブに失敗した場合は音声なしとみなす
-            print(f"Warning: Failed to probe audio stream: {e}", file=sys.stderr)
-            return False
-
     # ターミナルに赤文字でエラーを表示するためのANSIコード
     _RED = "\033[91m"
     _RESET = "\033[0m"
@@ -185,11 +174,10 @@ class VideoProcessor:
         end_pause_seconds: float = 0.0,
         target_resolution: str = "Original",
     ) -> None:
-        """単純な繰り返しループ。tpad フィルタで静止時間を追加。"""
+        """単純な繰り返しループ。tpad フィルタで静止時間を追加。映像のみ処理し、出力は無音。"""
         print("--- SIMPLE_LOOP: 開始 ---")
-        has_audio = self.has_audio_stream(input_path)
 
-        # 入力ストリームを取得し、加工の「前」にリサイズを適用（scale はアスペクト比維持・偶数化のため width=-2）
+        # 入力は映像ストリームのみ使用（音声は無視）
         stream = ffmpeg.input(str(input_path))
         stream_v = stream["v"]
         if target_resolution != "Original":
@@ -208,27 +196,14 @@ class VideoProcessor:
                 stop_duration=end_pause_seconds,
                 stop_mode="clone",
             )
-            if has_audio:
-                stream_a = stream["a"].filter("apad", pad_dur=start_pause_seconds + end_pause_seconds)
-                paused_video = self.temp_dir / f"paused_{input_path.stem}.mp4"
-                out_stream = ffmpeg.output(
-                    stream_v,
-                    stream_a,
-                    str(paused_video),
-                    vcodec="libx264",
-                    preset="ultrafast",
-                    crf=18,
-                    acodec="aac",
-                )
-            else:
-                paused_video = self.temp_dir / f"paused_{input_path.stem}.mp4"
-                out_stream = ffmpeg.output(
-                    stream_v,
-                    str(paused_video),
-                    vcodec="libx264",
-                    preset="ultrafast",
-                    crf=18,
-                )
+            paused_video = self.temp_dir / f"paused_{input_path.stem}.mp4"
+            out_stream = ffmpeg.output(
+                stream_v,
+                str(paused_video),
+                vcodec="libx264",
+                preset="ultrafast",
+                crf=18,
+            )
             self.run_ffmpeg_safe(out_stream, paused_video)
             loop_source = paused_video
         else:
@@ -236,47 +211,27 @@ class VideoProcessor:
             scale_height = self._scale_height_from_resolution(target_resolution)
             if target_resolution != "Original" and scale_height is not None:
                 scaled_only = self.temp_dir / f"scaled_{input_path.stem}.mp4"
-                if has_audio:
-                    out_stream = ffmpeg.output(
-                        stream_v,
-                        stream["a"],
-                        str(scaled_only),
-                        vcodec="libx264",
-                        preset="ultrafast",
-                        crf=18,
-                        acodec="aac",
-                    )
-                else:
-                    out_stream = ffmpeg.output(
-                        stream_v,
-                        str(scaled_only),
-                        vcodec="libx264",
-                        preset="ultrafast",
-                        crf=18,
-                    )
+                out_stream = ffmpeg.output(
+                    stream_v,
+                    str(scaled_only),
+                    vcodec="libx264",
+                    preset="ultrafast",
+                    crf=18,
+                )
                 self.run_ffmpeg_safe(out_stream, scaled_only)
                 loop_source = scaled_only
             else:
                 loop_source = input_path
 
-        # -stream_loop で指定回数分繰り返し、-t で最終長さを切り詰め（コピーのみで即完了、4Kでも止まらない）
+        # -stream_loop で指定回数分繰り返し、-t で最終長さを切り詰め（映像のみ、出力無音）
         print(f"--- SIMPLE_LOOP: STEP 2 - ループ生成開始 ({loops}回) ---")
         loop_input = ffmpeg.input(str(loop_source), stream_loop=loops - 1)
-        if has_audio:
-            out_stream = ffmpeg.output(
-                loop_input,
-                str(output_path),
-                vcodec="copy",
-                acodec="copy",
-                t=target_duration,
-            )
-        else:
-            out_stream = ffmpeg.output(
-                loop_input,
-                str(output_path),
-                vcodec="copy",
-                t=target_duration,
-            )
+        out_stream = ffmpeg.output(
+            loop_input["v"],
+            str(output_path),
+            vcodec="copy",
+            t=target_duration,
+        )
         self.run_ffmpeg_safe(out_stream, output_path)
         print("--- SIMPLE_LOOP: STEP 2 - 完了 ---")
 
@@ -298,16 +253,15 @@ class VideoProcessor:
         end_pause_seconds: float = 0.0,
         target_resolution: str = "Original",
     ) -> None:
-        """シンプルなPing-Pongループ。
+        """シンプルなPing-Pongループ。映像のみ処理し、出力は無音。
         
         ストリームA: 先頭に停止(tpad) + 入力動画 + 末尾に停止(tpad)
         ストリームB: 逆再生(reverse) + setpts(PTSリセット) + 末尾に停止(tpad)（End Pause時）
         結合: A + B → 再生→静止→逆再生→静止→再生 の1サイクル
         """
         print("--- PINGPONG_LOOP: 開始 ---")
-        has_audio = self.has_audio_stream(input_path)
 
-        # 入力ストリームを取得し、加工（逆再生など）の「前」にリサイズを適用（width=-2 でアスペクト比維持・偶数化）
+        # 入力は映像ストリームのみ使用（音声は無視）
         input_video = ffmpeg.input(str(input_path))
         stream_v = input_video["v"]
         if target_resolution != "Original":
@@ -332,160 +286,61 @@ class VideoProcessor:
         stream_b = stream_v.filter("reverse").filter("setpts", "PTS-STARTPTS")
         if end_pause_seconds > 0:
             stream_b = stream_b.filter("tpad", stop_duration=end_pause_seconds, stop_mode="clone")
-        
-        # 結合: A + B
+
+        # 結合: A + B（映像のみ）
         print("--- PINGPONG_LOOP: ストリーム結合開始 ---")
-        
-        if has_audio:
-            # 音声がある場合: ストリームAの音声を使用（ストリームBは逆再生音声）
-            audio_a = input_video["a"]
-            # 先頭にパディングを追加（adelayはミリ秒単位）
-            if start_pause_seconds > 0:
-                delay_ms = int(start_pause_seconds * 1000)
-                audio_a = audio_a.filter("adelay", delays=f"{delay_ms}|{delay_ms}")
-            # 末尾にパディングを追加
-            if end_pause_seconds > 0:
-                audio_a = audio_a.filter("apad", pad_dur=end_pause_seconds)
-            
-            audio_b = input_video["a"].filter("areverse")
-            if end_pause_seconds > 0:
-                audio_b = audio_b.filter("apad", pad_dur=end_pause_seconds)
-            
-            # concatで結合
-            cycle_path = self.temp_dir / f"cycle_{input_path.stem}.mp4"
-            concat_list = self.temp_dir / f"concat_{input_path.stem}.txt"
-            
-            # 一時ファイルとしてストリームAとBを保存
-            temp_a = self.temp_dir / f"temp_a_{input_path.stem}.mp4"
-            temp_b = self.temp_dir / f"temp_b_{input_path.stem}.mp4"
-            
-            # ストリームAを保存
-            stream = ffmpeg.output(
-                stream_a,
-                audio_a,
-                str(temp_a),
-                vcodec="libx264",
-                preset="ultrafast",
-                crf=18,
-                acodec="aac",
-            )
-            self.run_ffmpeg_safe(stream, temp_a)
-            
-            # ストリームBを保存
-            stream = ffmpeg.output(
-                stream_b,
-                audio_b,
-                str(temp_b),
-                vcodec="libx264",
-                preset="ultrafast",
-                crf=18,
-                acodec="aac",
-            )
-            self.run_ffmpeg_safe(stream, temp_b)
-            
-            # concatリストを作成
-            concat_lines = [
-                f"file '{temp_a.absolute()}'",
-                f"file '{temp_b.absolute()}'"
-            ]
-            concat_list.write_text(
-                "\n".join(concat_lines) + "\n",
-                encoding="utf-8"
-            )
-            
-            # concatで結合
-            concat_input = ffmpeg.input(str(concat_list), format="concat", safe=0)
-            stream = ffmpeg.output(
-                concat_input,
-                str(cycle_path),
-                vcodec="copy",
-                acodec="copy",
-            )
-            self.run_ffmpeg_safe(stream, cycle_path)
-            
-            # 一時ファイル削除
-            for p in [temp_a, temp_b, concat_list]:
-                if p.exists():
-                    try:
-                        p.unlink()
-                    except OSError:
-                        pass
-        else:
-            # 音声がない場合: よりシンプルに結合
-            cycle_path = self.temp_dir / f"cycle_{input_path.stem}.mp4"
-            concat_list = self.temp_dir / f"concat_{input_path.stem}.txt"
-            
-            # 一時ファイルとしてストリームAとBを保存
-            temp_a = self.temp_dir / f"temp_a_{input_path.stem}.mp4"
-            temp_b = self.temp_dir / f"temp_b_{input_path.stem}.mp4"
-            
-            # ストリームAを保存
-            stream = ffmpeg.output(
-                stream_a,
-                str(temp_a),
-                vcodec="libx264",
-                preset="ultrafast",
-                crf=18,
-            )
-            self.run_ffmpeg_safe(stream, temp_a)
-            
-            # ストリームBを保存
-            stream = ffmpeg.output(
-                stream_b,
-                str(temp_b),
-                vcodec="libx264",
-                preset="ultrafast",
-                crf=18,
-            )
-            self.run_ffmpeg_safe(stream, temp_b)
-            
-            # concatリストを作成
-            concat_lines = [
-                f"file '{temp_a.absolute()}'",
-                f"file '{temp_b.absolute()}'"
-            ]
-            concat_list.write_text(
-                "\n".join(concat_lines) + "\n",
-                encoding="utf-8"
-            )
-            
-            # concatで結合
-            concat_input = ffmpeg.input(str(concat_list), format="concat", safe=0)
-            stream = ffmpeg.output(
-                concat_input["v"],
-                str(cycle_path),
-                vcodec="copy",
-            )
-            self.run_ffmpeg_safe(stream, cycle_path)
-            
-            # 一時ファイル削除
-            for p in [temp_a, temp_b, concat_list]:
-                if p.exists():
-                    try:
-                        p.unlink()
-                    except OSError:
-                        pass
-        
+        cycle_path = self.temp_dir / f"cycle_{input_path.stem}.mp4"
+        concat_list = self.temp_dir / f"concat_{input_path.stem}.txt"
+        temp_a = self.temp_dir / f"temp_a_{input_path.stem}.mp4"
+        temp_b = self.temp_dir / f"temp_b_{input_path.stem}.mp4"
+
+        stream = ffmpeg.output(
+            stream_a,
+            str(temp_a),
+            vcodec="libx264",
+            preset="ultrafast",
+            crf=18,
+        )
+        self.run_ffmpeg_safe(stream, temp_a)
+
+        stream = ffmpeg.output(
+            stream_b,
+            str(temp_b),
+            vcodec="libx264",
+            preset="ultrafast",
+            crf=18,
+        )
+        self.run_ffmpeg_safe(stream, temp_b)
+
+        concat_list.write_text(
+            f"file '{temp_a.absolute()}'\nfile '{temp_b.absolute()}'\n",
+            encoding="utf-8",
+        )
+        concat_input = ffmpeg.input(str(concat_list), format="concat", safe=0)
+        stream = ffmpeg.output(
+            concat_input["v"],
+            str(cycle_path),
+            vcodec="copy",
+        )
+        self.run_ffmpeg_safe(stream, cycle_path)
+
+        for p in [temp_a, temp_b, concat_list]:
+            if p.exists():
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
         print("--- PINGPONG_LOOP: ストリーム結合完了 ---")
-        
-        # ループ生成（コピーのみで即完了、4Kでも止まらない）
+
+        # ループ生成（映像のみ、出力無音）
         print(f"--- PINGPONG_LOOP: ループ生成開始 ({loops}回) ---")
         loop_input = ffmpeg.input(str(cycle_path), stream_loop=loops - 1)
-        if has_audio:
-            stream = ffmpeg.output(
-                loop_input,
-                str(output_path),
-                vcodec="copy",
-                acodec="copy",
-                t=target_duration,
-            )
-        else:
-            stream = ffmpeg.output(
-                loop_input["v"],
-                str(output_path),
-                vcodec="copy",
-                t=target_duration,
-            )
+        stream = ffmpeg.output(
+            loop_input["v"],
+            str(output_path),
+            vcodec="copy",
+            t=target_duration,
+        )
         self.run_ffmpeg_safe(stream, output_path)
         print("--- PINGPONG_LOOP: ループ生成完了 ---")
         
@@ -507,17 +362,15 @@ class VideoProcessor:
         clip_duration: float,
         target_resolution: str = "Original",
     ) -> None:
-        """前後をクロスフェードさせたシームレスループ。"""
+        """前後をクロスフェードさせたシームレスループ。映像のみ処理し、出力は無音。"""
         print("--- CROSSFADE_LOOP: 開始 ---")
-        has_audio = self.has_audio_stream(input_path)
 
         # crossfade_seconds が長すぎる場合を補正
         crossfade = max(0.1, min(crossfade_seconds, clip_duration / 2))
         offset = max(0.0, clip_duration - crossfade)
         print(f"--- CROSSFADE_LOOP: STEP 1 - クロスフェード設定 (duration={crossfade}s, offset={offset}s) ---")
 
-        # 入力ストリームを1本用意し、split で2本に分けて xfade に渡す
-        # （同じ入力から2本使うと「multiple outgoing edges」エラーになるため split が必須）
+        # 入力は映像ストリームのみ使用（音声は無視）。split で2本に分けて xfade に渡す
         stream = ffmpeg.input(str(input_path))
         v = stream["v"]
         if target_resolution != "Original":
@@ -531,53 +384,32 @@ class VideoProcessor:
         v1 = v_split[1].filter("format", "yuv420p").filter("setsar", "1")
         v_out = ffmpeg.filter([v0, v1], "xfade", transition="fade", duration=crossfade, offset=offset)
 
-        # 1 サイクル分のループクリップ（自分自身とのクロスフェード）を作る
+        # 1 サイクル分のループクリップ（映像のみ、無音）
         cycle_path = self.temp_dir / f"cross_{input_path.stem}.mp4"
-        print(f"--- CROSSFADE_LOOP: STEP 2 - クロスフェード動画生成開始 (音声: {has_audio}) ---")
-        
-        if has_audio:
-            stream = ffmpeg.output(
-                v_out,
-                stream["a"],
-                str(cycle_path),
-                vcodec="libx264",
-                preset="ultrafast",
-                crf=18,
-                acodec="aac",
-            )
-        else:
-            stream = ffmpeg.output(
-                v_out,
-                str(cycle_path),
-                vcodec="libx264",
-                preset="ultrafast",
-                crf=18,
-            )
+        print("--- CROSSFADE_LOOP: STEP 2 - クロスフェード動画生成開始 ---")
+        stream = ffmpeg.output(
+            v_out,
+            str(cycle_path),
+            vcodec="libx264",
+            preset="ultrafast",
+            crf=18,
+        )
         self.run_ffmpeg_safe(stream, cycle_path)
         print("--- CROSSFADE_LOOP: STEP 2 - クロスフェード動画生成完了 ---")
 
-        # このサイクルクリップを単純ループして所定時間まで伸ばす（コピーのみで即完了）
+        # このサイクルクリップを単純ループして所定時間まで伸ばす（映像のみ、出力無音）
         print("--- CROSSFADE_LOOP: STEP 3 - ループ生成開始 ---")
         cycle_duration = self.get_video_duration(cycle_path)
         loop_count = max(1, math.ceil(target_duration / cycle_duration))
         print(f"--- CROSSFADE_LOOP: STEP 3 - ループ回数: {loop_count}回 ---")
 
-        stream = ffmpeg.input(str(cycle_path), stream_loop=loop_count - 1)
-        if has_audio:
-            stream = ffmpeg.output(
-                stream,
-                str(output_path),
-                vcodec="copy",
-                acodec="copy",
-                t=target_duration,
-            )
-        else:
-            stream = ffmpeg.output(
-                stream["v"],
-                str(output_path),
-                vcodec="copy",
-                t=target_duration,
-            )
+        loop_input = ffmpeg.input(str(cycle_path), stream_loop=loop_count - 1)
+        stream = ffmpeg.output(
+            loop_input["v"],
+            str(output_path),
+            vcodec="copy",
+            t=target_duration,
+        )
         self.run_ffmpeg_safe(stream, output_path)
         print("--- CROSSFADE_LOOP: STEP 3 - ループ生成完了 ---")
 
