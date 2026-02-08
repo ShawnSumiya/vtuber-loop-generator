@@ -58,7 +58,8 @@ export default function Home() {
       formData.append("end_pause_seconds", endPauseSeconds.toString());
       formData.append("resolution", resolution);
 
-      const response = await fetch("http://localhost:8000/process-video", {
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const response = await fetch(`${API_BASE_URL}/process-video`, {
         method: "POST",
         body: formData,
         signal: controller.signal,
