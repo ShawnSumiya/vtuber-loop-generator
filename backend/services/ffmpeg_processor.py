@@ -49,6 +49,11 @@ class VideoProcessor:
         loops = max(1, math.ceil(target_duration / base_duration))
         print(f"--- PROCESS: ループ回数 = {loops}回 ---")
 
+        # 入力解像度（高さ）を取得。ダウンスケール時は「先に縮小してから処理」するために使用
+        input_height = self.get_video_height(input_path)
+        if input_height > 0:
+            print(f"--- PROCESS: 入力動画の高さ = {input_height}px ---")
+
         # FFmpeg は同期ブロッキングのため、イベントループをブロックしないようスレッドで実行
         if mode == LoopMode.SIMPLE:
             await asyncio.to_thread(
@@ -71,6 +76,7 @@ class VideoProcessor:
                 start_pause_seconds,
                 end_pause_seconds,
                 target_resolution,
+                input_height,
             )
         elif mode == LoopMode.CROSSFade:
             await asyncio.to_thread(
@@ -82,6 +88,7 @@ class VideoProcessor:
                 crossfade_seconds,
                 base_duration,
                 target_resolution,
+                input_height,
             )
         else:
             raise ValueError(f"Unsupported loop mode: {mode}")
@@ -110,6 +117,28 @@ class VideoProcessor:
             return float(result.stdout.strip())
         except ValueError as e:
             raise RuntimeError("Invalid duration from ffprobe") from e
+
+    def get_video_height(self, path: Path) -> int:
+        """ffprobe で動画ストリームの高さ（ピクセル）を取得。取得失敗時は 0 を返す。"""
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=height",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(path),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0 or not result.stdout.strip():
+            return 0
+        try:
+            return int(result.stdout.strip())
+        except ValueError:
+            return 0
 
     # ターミナルに赤文字でエラーを表示するためのANSIコード
     _RED = "\033[91m"
@@ -253,23 +282,32 @@ class VideoProcessor:
         start_pause_seconds: float = 0.0,
         end_pause_seconds: float = 0.0,
         target_resolution: str = "Original",
+        input_height: int = 0,
     ) -> None:
         """シンプルなPing-Pongループ。映像のみ処理し、出力は無音。
         
         ストリームA: 先頭に停止(tpad) + 入力動画 + 末尾に停止(tpad)
         ストリームB: 逆再生(reverse) + setpts(PTSリセット) + 末尾に停止(tpad)（End Pause時）
         結合: A + B → 再生→静止→逆再生→静止→再生 の1サイクル
+        
+        解像度: 4K→720p などダウンスケールの場合は先に縮小してから reverse（メモリ節約）。
+        それ以外は reverse を元解像度で行い、出力直前に scale する。
         """
         print("--- PINGPONG_LOOP: 開始 ---")
 
-        # 入力は映像ストリームのみ使用（音声は無視）
+        scale_height = self._scale_height_from_resolution(target_resolution) if target_resolution != "Original" else None
+        # ダウンスケール（例: 4K入力→720p出力）なら先に縮小してから reverse しないと OOM になる
+        scale_first = scale_height is not None and input_height > 0 and scale_height < input_height
+
+        if scale_first:
+            print(f"--- PINGPONG_LOOP: ダウンスケールのため先にリサイズ ({target_resolution} -> 高さ{scale_height}) ---")
+        elif scale_height is not None:
+            print(f"--- PINGPONG_LOOP: リサイズは出力直前に適用 ({target_resolution} -> 高さ{scale_height}) ---")
+
         input_video = ffmpeg.input(str(input_path))
         stream_v = input_video["v"]
-        if target_resolution != "Original":
-            scale_height = self._scale_height_from_resolution(target_resolution)
-            if scale_height is not None:
-                print(f"--- PINGPONG_LOOP: リサイズ適用 ({target_resolution} -> 高さ{scale_height}) ---")
-                stream_v = stream_v.filter("scale", "-2", str(scale_height))
+        if scale_first:
+            stream_v = stream_v.filter("scale", "-2", str(scale_height))
 
         # ストリームA: Forward パート（先頭・末尾に tpad）
         print("--- PINGPONG_LOOP: ストリームA生成開始 ---")
@@ -282,11 +320,16 @@ class VideoProcessor:
         else:
             stream_a = stream_v
 
-        # ストリームB: Reverse パート（scale 済みの stream_v を逆再生）+ 末尾静止（対称のため）
+        # ストリームB: Reverse パート（scale_first 時は既に縮小済み、そうでなければ元解像度）
         print("--- PINGPONG_LOOP: ストリームB生成開始 ---")
         stream_b = stream_v.filter("reverse").filter("setpts", "PTS-STARTPTS")
         if end_pause_seconds > 0:
             stream_b = stream_b.filter("tpad", stop_duration=end_pause_seconds, stop_mode="clone")
+
+        # アップスケール／同一解像度のときだけ、出力直前にリサイズ
+        if scale_height is not None and not scale_first:
+            stream_a = stream_a.filter("scale", "-2", str(scale_height))
+            stream_b = stream_b.filter("scale", "-2", str(scale_height))
 
         # 結合: A + B（映像のみ）
         print("--- PINGPONG_LOOP: ストリーム結合開始 ---")
@@ -362,8 +405,11 @@ class VideoProcessor:
         crossfade_seconds: float,
         clip_duration: float,
         target_resolution: str = "Original",
+        input_height: int = 0,
     ) -> None:
-        """前後をクロスフェードさせたシームレスループ。映像のみ処理し、出力は無音。"""
+        """前後をクロスフェードさせたシームレスループ。映像のみ処理し、出力は無音。
+        4K→720p などダウンスケールの場合は先に縮小してから xfade（メモリ節約）。そうでなければ xfade 後に scale。
+        """
         print("--- CROSSFADE_LOOP: 開始 ---")
 
         # crossfade_seconds が長すぎる場合を補正
@@ -371,19 +417,26 @@ class VideoProcessor:
         offset = max(0.0, clip_duration - crossfade)
         print(f"--- CROSSFADE_LOOP: STEP 1 - クロスフェード設定 (duration={crossfade}s, offset={offset}s) ---")
 
-        # 入力は映像ストリームのみ使用（音声は無視）。split で2本に分けて xfade に渡す
+        scale_height = self._scale_height_from_resolution(target_resolution) if target_resolution != "Original" else None
+        scale_first = scale_height is not None and input_height > 0 and scale_height < input_height
+
+        if scale_first:
+            print(f"--- CROSSFADE_LOOP: ダウンスケールのため先にリサイズ ({target_resolution} -> 高さ{scale_height}) ---")
+        elif scale_height is not None:
+            print(f"--- CROSSFADE_LOOP: リサイズは出力直前に適用 ({target_resolution} -> 高さ{scale_height}) ---")
+
         stream = ffmpeg.input(str(input_path))
         v = stream["v"]
-        if target_resolution != "Original":
-            scale_height = self._scale_height_from_resolution(target_resolution)
-            if scale_height is not None:
-                print(f"--- CROSSFADE_LOOP: リサイズ適用 ({target_resolution} -> 高さ{scale_height}) ---")
-                v = v.filter("scale", "-2", str(scale_height))
+        if scale_first:
+            v = v.filter("scale", "-2", str(scale_height))
 
         v_split = v.filter_multi_output("split", 2)
         v0 = v_split.stream(0).filter("format", "yuv420p").filter("setsar", "1")
         v1 = v_split[1].filter("format", "yuv420p").filter("setsar", "1")
         v_out = ffmpeg.filter([v0, v1], "xfade", transition="fade", duration=crossfade, offset=offset)
+
+        if scale_height is not None and not scale_first:
+            v_out = v_out.filter("scale", "-2", str(scale_height))
 
         # 1 サイクル分のループクリップ（映像のみ、無音）
         cycle_path = self.temp_dir / f"cross_{input_path.stem}.mp4"
