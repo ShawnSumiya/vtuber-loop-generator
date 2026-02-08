@@ -7,7 +7,7 @@ import SettingsPanel from "@/components/SettingsPanel";
 import VideoPreview from "@/components/VideoPreview";
 
 type LoopMode = "simple" | "pingpong" | "crossfade";
-type Resolution = "Original" | "720p" | "1080p" | "4K";
+type Resolution = "Original" | "720p";
 
 export default function Home() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);

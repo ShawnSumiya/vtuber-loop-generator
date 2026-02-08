@@ -4,7 +4,7 @@ import { Repeat, ArrowLeftRight, Sparkles } from "lucide-react";
 
 type LoopMode = "simple" | "pingpong" | "crossfade";
 
-type Resolution = "Original" | "720p" | "1080p" | "4K";
+type Resolution = "Original" | "720p";
 
 interface SettingsPanelProps {
   durationSeconds: number;
@@ -208,9 +208,10 @@ export default function SettingsPanel({
         >
           <option value="Original">Original (そのまま)</option>
           <option value="720p">720p (HD)</option>
-          <option value="1080p">1080p (FHD)</option>
-          <option value="4K">4K (UHD)</option>
         </select>
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          高解像度の動画はサーバー制限のため 720p に制限して出力されます。
+        </p>
       </div>
 
       {/* 静止（ポーズ）時間（Simple と Ping-Pong モード時のみ表示） */}

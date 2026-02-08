@@ -54,6 +54,11 @@ class VideoProcessor:
         if input_height > 0:
             print(f"--- PROCESS: 入力動画の高さ = {input_height}px ---")
 
+        # サーバーリソース制限: Original 選択でも入力が 720 超の場合は 720p に制限（OOM 防止）
+        if target_resolution == "Original" and input_height > 720:
+            print(f"--- PROCESS: 高解像度のため 720p に制限します（入力高さ {input_height}px） ---")
+            target_resolution = "720p"
+
         # FFmpeg は同期ブロッキングのため、イベントループをブロックしないようスレッドで実行
         if mode == LoopMode.SIMPLE:
             await asyncio.to_thread(
