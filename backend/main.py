@@ -14,18 +14,20 @@ TEMP_DIR.mkdir(exist_ok=True)
 
 app = FastAPI(title="VTuber Background Loop Generator")
 
-# CORS: フロントエンド (Next.js) からのアクセスを許可
+# --- CORS設定 ---
+# 許可するオリジンのリスト
 origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
+    "http://localhost:3000",                      # ローカル開発用
+    "https://vtuber-loop-generator.vercel.app",   # Vercelの本番URL
+    "*",                                          # ★緊急策: すべて許可（どうしても動かない場合）
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=origins,        # 許可するリストをセット
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],          # 全てのメソッド(GET, POSTなど)を許可
+    allow_headers=["*"],          # 全てのヘッダーを許可
 )
 
 video_processor = VideoProcessor(temp_dir=TEMP_DIR)
