@@ -1,0 +1,18 @@
+# Python系
+__pycache__/
+*.py[cod]
+venv/
+.env
+
+# Node.js系
+node_modules/
+.next/
+out/
+build/
+.DS_Store
+
+# 動画ファイル（重すぎるので除外）
+*.mp4
+*.mov
+temp/
+uploads/
