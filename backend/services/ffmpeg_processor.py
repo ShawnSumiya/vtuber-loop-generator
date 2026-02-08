@@ -184,7 +184,8 @@ class VideoProcessor:
             scale_height = self._scale_height_from_resolution(target_resolution)
             if scale_height is not None:
                 print(f"--- SIMPLE_LOOP: リサイズ適用 ({target_resolution} -> 高さ{scale_height}) ---")
-                stream_v = stream_v.filter("scale", -2, scale_height)
+                # 幅は -2（アスペクト比維持・2の倍数）、高さを指定。文字列で渡してエスケープ不具合を防ぐ
+                stream_v = stream_v.filter("scale", "-2", str(scale_height))
 
         # 静止時間を追加する場合は tpad を適用
         if start_pause_seconds > 0 or end_pause_seconds > 0:
@@ -268,7 +269,7 @@ class VideoProcessor:
             scale_height = self._scale_height_from_resolution(target_resolution)
             if scale_height is not None:
                 print(f"--- PINGPONG_LOOP: リサイズ適用 ({target_resolution} -> 高さ{scale_height}) ---")
-                stream_v = stream_v.filter("scale", -2, scale_height)
+                stream_v = stream_v.filter("scale", "-2", str(scale_height))
 
         # ストリームA: Forward パート（先頭・末尾に tpad）
         print("--- PINGPONG_LOOP: ストリームA生成開始 ---")
@@ -377,7 +378,7 @@ class VideoProcessor:
             scale_height = self._scale_height_from_resolution(target_resolution)
             if scale_height is not None:
                 print(f"--- CROSSFADE_LOOP: リサイズ適用 ({target_resolution} -> 高さ{scale_height}) ---")
-                v = v.filter("scale", -2, scale_height)
+                v = v.filter("scale", "-2", str(scale_height))
 
         v_split = v.filter_multi_output("split", 2)
         v0 = v_split.stream(0).filter("format", "yuv420p").filter("setsar", "1")
