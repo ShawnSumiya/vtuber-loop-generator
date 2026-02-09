@@ -12,6 +12,10 @@ from typing import Optional
 import ffmpeg
 
 
+# Crossfade時はメモリ対策のため最初にこの解像度へリサイズ（480p相当・16:9で幅854px）
+MAX_WIDTH_CROSSFADE = 854
+
+
 class LoopMode(str, Enum):
     SIMPLE = "simple"
     PINGPONG = "pingpong"
@@ -68,6 +72,11 @@ class VideoProcessor:
         if target_resolution == "Original" and input_height > 720:
             print(f"--- PROCESS: 高解像度のため 720p に制限します（入力高さ {input_height}px） ---")
             target_resolution = "720p"
+
+        # Crossfade時はメモリ対策のため 480p に固定（無料枠などで安定動作させる）
+        if mode == LoopMode.CROSSFade:
+            target_resolution = "480p"
+            print("--- PROCESS: Crossfade のため解像度を 480p に制限します（メモリ対策） ---")
 
         # FFmpeg は同期ブロッキングのため、イベントループをブロックしないようスレッドで実行
         if mode == LoopMode.SIMPLE:
@@ -214,8 +223,8 @@ class VideoProcessor:
         return 1.0
 
     def _scale_height_from_resolution(self, resolution: str) -> Optional[int]:
-        """解像度文字列から高さを返す。例: '1080p' -> 1080, '4K' -> 2160。"""
-        return {"720p": 720, "1080p": 1080, "4K": 2160}.get(resolution)
+        """解像度文字列から高さを返す。例: '1080p' -> 1080, '4K' -> 2160, '480p' -> 480。"""
+        return {"480p": 480, "720p": 720, "1080p": 1080, "4K": 2160}.get(resolution)
 
     def _print_stderr_error(self, label: str, message: str) -> None:
         """エラー内容をコンソールに赤文字で表示（原因特定のため必ず表示）。"""
@@ -366,8 +375,9 @@ class VideoProcessor:
         """シンプルなPing-Pongループ。映像のみ処理し、出力は無音。
         
         ストリームA: 先頭に停止(tpad) + 入力動画 + 末尾に停止(tpad)
-        ストリームB: 逆再生(reverse) + setpts(PTSリセット) + 末尾に停止(tpad)（End Pause時）
-        結合: A + B → 再生→静止→逆再生→静止→再生 の1サイクル
+        ストリームB: 逆再生(reverse) + setpts(PTSリセット) のみ（末尾にtpadは付けない）
+        End Pause時: ストリームPause = 先頭1フレームを end_pause_seconds 分延長したクリップを別出力
+        結合: A + B + (Pause) → 再生→Pause→逆再生→Pause→再生 の1サイクル
         
         解像度: 4K→720p などダウンスケールの場合は先に縮小してから reverse（メモリ節約）。
         それ以外は reverse を元解像度で行い、出力直前に scale する。
@@ -411,23 +421,36 @@ class VideoProcessor:
         else:
             stream_a = stream_v
 
-        # ストリームB: Reverse パート（scale_first 時は既に縮小済み、そうでなければ元解像度）
+        # ストリームB: Reverse パート（末尾にtpadは付けず、End Pauseは別セグメントで結合）
         print("--- PINGPONG_LOOP: ストリームB生成開始 ---")
         stream_b = stream_v.filter("reverse").filter("setpts", "PTS-STARTPTS")
+
+        # End Pause時: 逆再生の直後に挿入する「ポーズクリップ」（先頭1フレームを end_pause 秒分表示）
+        effective_fps = max(1, round(input_fps * speed)) if speed != 1.0 else input_fps
+        one_frame_duration = 1.0 / effective_fps
         if end_pause_seconds > 0:
-            stream_b = stream_b.filter("tpad", stop_duration=end_pause_seconds, stop_mode="clone")
+            stream_pause = (
+                stream_v.filter("trim", duration=one_frame_duration)
+                .filter("setpts", "PTS-STARTPTS")
+                .filter("tpad", stop_duration=end_pause_seconds, stop_mode="clone")
+            )
+        else:
+            stream_pause = None
 
         # アップスケール／同一解像度のときだけ、出力直前にリサイズ
         if scale_height is not None and not scale_first:
             stream_a = stream_a.filter("scale", "-2", str(scale_height))
             stream_b = stream_b.filter("scale", "-2", str(scale_height))
+            if stream_pause is not None:
+                stream_pause = stream_pause.filter("scale", "-2", str(scale_height))
 
-        # 結合: A + B（映像のみ）
+        # 結合: A + B、End Pause時は A + B + Pause（映像のみ）
         print("--- PINGPONG_LOOP: ストリーム結合開始 ---")
         cycle_path = self.temp_dir / f"cycle_{input_path.stem}.mp4"
         concat_list = self.temp_dir / f"concat_{input_path.stem}.txt"
         temp_a = self.temp_dir / f"temp_a_{input_path.stem}.mp4"
         temp_b = self.temp_dir / f"temp_b_{input_path.stem}.mp4"
+        temp_pause = self.temp_dir / f"temp_pause_{input_path.stem}.mp4"
 
         stream = ffmpeg.output(
             stream_a,
@@ -447,10 +470,19 @@ class VideoProcessor:
         )
         self.run_ffmpeg_safe(stream, temp_b)
 
-        concat_list.write_text(
-            f"file '{temp_a.absolute()}'\nfile '{temp_b.absolute()}'\n",
-            encoding="utf-8",
-        )
+        concat_lines = [f"file '{temp_a.absolute()}'", f"file '{temp_b.absolute()}'"]
+        if stream_pause is not None:
+            stream = ffmpeg.output(
+                stream_pause,
+                str(temp_pause),
+                vcodec="libx264",
+                preset="ultrafast",
+                crf=18,
+            )
+            self.run_ffmpeg_safe(stream, temp_pause)
+            concat_lines.append(f"file '{temp_pause.absolute()}'")
+
+        concat_list.write_text("\n".join(concat_lines) + "\n", encoding="utf-8")
         concat_input = ffmpeg.input(str(concat_list), format="concat", safe=0)
         stream = ffmpeg.output(
             concat_input["v"],
@@ -459,7 +491,10 @@ class VideoProcessor:
         )
         self.run_ffmpeg_safe(stream, cycle_path)
 
-        for p in [temp_a, temp_b, concat_list]:
+        to_unlink = [temp_a, temp_b, concat_list]
+        if end_pause_seconds > 0:
+            to_unlink.append(temp_pause)
+        for p in to_unlink:
             if p.exists():
                 try:
                     p.unlink()
@@ -501,7 +536,7 @@ class VideoProcessor:
     ) -> None:
         """前後をクロスフェードさせたシームレスループ。映像のみ処理し、出力は無音。
         clip_duration は速度変更後の実効尺（xfade offset 計算用）。
-        4K→720p などダウンスケールの場合は先に縮小してから xfade（メモリ節約）。そうでなければ xfade 後に scale。
+        メモリ対策のため、Crossfade 時は常に最初に 480p（幅854px）へリサイズしてから xfade する。
         """
         print("--- CROSSFADE_LOOP: 開始 ---")
 
@@ -510,18 +545,10 @@ class VideoProcessor:
         offset = max(0.0, clip_duration - crossfade)
         print(f"--- CROSSFADE_LOOP: STEP 1 - クロスフェード設定 (duration={crossfade}s, offset={offset}s) ---")
 
-        scale_height = self._scale_height_from_resolution(target_resolution) if target_resolution != "Original" else None
-        scale_first = scale_height is not None and input_height > 0 and scale_height < input_height
-
-        if scale_first:
-            print(f"--- CROSSFADE_LOOP: ダウンスケールのため先にリサイズ ({target_resolution} -> 高さ{scale_height}) ---")
-        elif scale_height is not None:
-            print(f"--- CROSSFADE_LOOP: リサイズは出力直前に適用 ({target_resolution} -> 高さ{scale_height}) ---")
-
+        # 【重要】メモリ対策: Crossfade 時は常に最初に 480p 相当へリサイズ（scale=854:-2）
+        print(f"--- CROSSFADE_LOOP: メモリ対策のため先に 480p へリサイズ (幅{MAX_WIDTH_CROSSFADE}px) ---")
         stream = ffmpeg.input(str(input_path))
-        v = stream["v"]
-        if scale_first:
-            v = v.filter("scale", "-2", str(scale_height))
+        v = stream["v"].filter("scale", str(MAX_WIDTH_CROSSFADE), "-2")
         stream_resized = v
 
         # リサイズ直後に速度変更を適用（setpts）
@@ -536,9 +563,7 @@ class VideoProcessor:
         v0 = v_split.stream(0).filter("format", "yuv420p").filter("setsar", "1")
         v1 = v_split[1].filter("format", "yuv420p").filter("setsar", "1")
         v_out = ffmpeg.filter([v0, v1], "xfade", transition="fade", duration=crossfade, offset=offset)
-
-        if scale_height is not None and not scale_first:
-            v_out = v_out.filter("scale", "-2", str(scale_height))
+        # 出力は 480p のまま（追加の scale はしない）
 
         # 1 サイクル分のループクリップ（映像のみ、無音）
         cycle_path = self.temp_dir / f"cross_{input_path.stem}.mp4"
