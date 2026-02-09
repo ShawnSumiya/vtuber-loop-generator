@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 
@@ -9,6 +9,13 @@ export const metadata: Metadata = {
   description: "短い動画クリップを自然にループさせた背景動画を自動生成",
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: "cover",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -16,7 +23,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ja" className="dark">
-      <body className={inter.className}>{children}</body>
+      <body className={`${inter.className} antialiased safe-area-padding`}>
+        {children}
+      </body>
     </html>
   );
 }

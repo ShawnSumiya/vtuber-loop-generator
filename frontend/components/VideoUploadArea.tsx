@@ -77,12 +77,14 @@ export default function VideoUploadArea({
   return (
     <div>
       {selectedFile ? (
-        <div className="border-2 border-primary/50 rounded-lg p-4 bg-primary/10">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <FileVideo className="w-8 h-8 text-primary" />
-              <div>
-                <p className="font-medium text-sm">{selectedFile.name}</p>
+        <div className="border-2 border-primary/50 rounded-lg p-3 sm:p-4 bg-primary/10">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              <FileVideo className="w-8 h-8 text-primary shrink-0" />
+              <div className="min-w-0">
+                <p className="font-medium text-sm truncate" title={selectedFile.name}>
+                  {selectedFile.name}
+                </p>
                 <p className="text-xs text-muted-foreground">
                   {formatFileSize(selectedFile.size)}
                 </p>
@@ -90,7 +92,7 @@ export default function VideoUploadArea({
             </div>
             <button
               onClick={handleRemove}
-              className="p-1 hover:bg-secondary rounded transition-colors"
+              className="p-2 sm:p-1 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center hover:bg-secondary rounded transition-colors touch-manipulation shrink-0"
               aria-label="ファイルを削除"
             >
               <X className="w-5 h-5" />
@@ -102,7 +104,7 @@ export default function VideoUploadArea({
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+          className={`border-2 border-dashed rounded-lg p-6 sm:p-8 text-center transition-colors ${
             isDragging
               ? "border-primary bg-primary/10"
               : "border-border hover:border-primary/50"
@@ -116,7 +118,7 @@ export default function VideoUploadArea({
             または
           </p>
           <label className="inline-block">
-            <span className="bg-primary hover:bg-primary/90 text-primary-foreground px-4 py-2 rounded-lg cursor-pointer text-sm font-medium transition-colors">
+            <span className="inline-flex items-center justify-center min-h-[44px] bg-primary hover:bg-primary/90 text-primary-foreground px-4 py-2 rounded-lg cursor-pointer text-sm font-medium transition-colors touch-manipulation">
               ファイルを選択
             </span>
             <input

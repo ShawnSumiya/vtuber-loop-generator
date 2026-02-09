@@ -59,7 +59,7 @@ export default function SettingsPanel({
         <label className="block text-sm font-medium mb-2">
           目標の長さ: {formatDuration(durationSeconds)}
         </label>
-        <div className="flex gap-4 items-center">
+        <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 sm:items-center">
           <input
             type="range"
             min="5"
@@ -68,46 +68,48 @@ export default function SettingsPanel({
             value={durationSeconds}
             onChange={(e) => onDurationChange(Number(e.target.value))}
             disabled={disabled}
-            className="flex-1 h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
+            className="w-full sm:flex-1 h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary touch-manipulation"
           />
-          <input
-            type="number"
-            min="5"
-            max="3600"
-            step="5"
-            value={durationSeconds}
-            onChange={(e) => onDurationChange(Number(e.target.value))}
-            disabled={disabled}
-            className="w-20 px-2 py-1 bg-secondary border border-border rounded text-sm"
-          />
-          <span className="text-xs text-muted-foreground">秒</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <input
+              type="number"
+              min="5"
+              max="3600"
+              step="5"
+              value={durationSeconds}
+              onChange={(e) => onDurationChange(Number(e.target.value))}
+              disabled={disabled}
+              className="w-20 px-2 py-1.5 sm:py-1 bg-secondary border border-border rounded text-sm min-h-[44px] sm:min-h-0"
+            />
+            <span className="text-xs text-muted-foreground">秒</span>
+          </div>
         </div>
-        <div className="flex gap-4 mt-2">
+        <div className="flex flex-wrap gap-2 sm:gap-4 mt-2">
           <button
             onClick={() => onDurationChange(30)}
             disabled={disabled}
-            className="text-xs px-2 py-1 bg-secondary hover:bg-secondary/80 rounded transition-colors disabled:opacity-50"
+            className="text-xs px-3 py-2 min-h-[44px] sm:min-h-0 sm:py-1 bg-secondary hover:bg-secondary/80 rounded transition-colors disabled:opacity-50 touch-manipulation"
           >
             30秒
           </button>
           <button
             onClick={() => onDurationChange(60)}
             disabled={disabled}
-            className="text-xs px-2 py-1 bg-secondary hover:bg-secondary/80 rounded transition-colors disabled:opacity-50"
+            className="text-xs px-3 py-2 min-h-[44px] sm:min-h-0 sm:py-1 bg-secondary hover:bg-secondary/80 rounded transition-colors disabled:opacity-50 touch-manipulation"
           >
             1分
           </button>
           <button
             onClick={() => onDurationChange(300)}
             disabled={disabled}
-            className="text-xs px-2 py-1 bg-secondary hover:bg-secondary/80 rounded transition-colors disabled:opacity-50"
+            className="text-xs px-3 py-2 min-h-[44px] sm:min-h-0 sm:py-1 bg-secondary hover:bg-secondary/80 rounded transition-colors disabled:opacity-50 touch-manipulation"
           >
             5分
           </button>
           <button
             onClick={() => onDurationChange(3600)}
             disabled={disabled}
-            className="text-xs px-2 py-1 bg-secondary hover:bg-secondary/80 rounded transition-colors disabled:opacity-50"
+            className="text-xs px-3 py-2 min-h-[44px] sm:min-h-0 sm:py-1 bg-secondary hover:bg-secondary/80 rounded transition-colors disabled:opacity-50 touch-manipulation"
           >
             1時間
           </button>
@@ -123,7 +125,7 @@ export default function SettingsPanel({
           <button
             onClick={() => onLoopModeChange("simple")}
             disabled={disabled}
-            className={`p-4 rounded-lg border-2 text-left transition-all ${
+            className={`p-3 sm:p-4 min-h-[44px] rounded-lg border-2 text-left transition-all touch-manipulation ${
               loopMode === "simple"
                 ? "border-primary bg-primary/10"
                 : "border-border hover:border-primary/50"
@@ -143,7 +145,7 @@ export default function SettingsPanel({
           <button
             onClick={() => onLoopModeChange("pingpong")}
             disabled={disabled}
-            className={`p-4 rounded-lg border-2 text-left transition-all ${
+            className={`p-3 sm:p-4 min-h-[44px] rounded-lg border-2 text-left transition-all touch-manipulation ${
               loopMode === "pingpong"
                 ? "border-primary bg-primary/10"
                 : "border-border hover:border-primary/50"
@@ -163,7 +165,7 @@ export default function SettingsPanel({
           <button
             onClick={() => onLoopModeChange("crossfade")}
             disabled={disabled}
-            className={`p-4 rounded-lg border-2 text-left transition-all ${
+            className={`p-3 sm:p-4 min-h-[44px] rounded-lg border-2 text-left transition-all touch-manipulation ${
               loopMode === "crossfade"
                 ? "border-primary bg-primary/10"
                 : "border-border hover:border-primary/50"
@@ -174,7 +176,7 @@ export default function SettingsPanel({
               <div>
                 <p className="font-medium text-sm">Crossfade (Seamless)</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  前後をクロスフェードさせて自然につなぐ。風景などに最適。
+                  前後をクロスフェードさせて自然につなぐ。風景などに最適。出力は 480p 固定です。
                 </p>
               </div>
             </div>
@@ -196,7 +198,7 @@ export default function SettingsPanel({
             value={crossfadeSeconds}
             onChange={(e) => onCrossfadeChange(Number(e.target.value))}
             disabled={disabled}
-            className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
+            className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary touch-manipulation"
           />
         </div>
       )}
@@ -210,13 +212,15 @@ export default function SettingsPanel({
           value={resolution}
           onChange={(e) => onResolutionChange(e.target.value as Resolution)}
           disabled={disabled}
-          className="w-full px-3 py-2 bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full px-3 py-2.5 sm:py-2 min-h-[44px] sm:min-h-0 bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
         >
           <option value="Original">Original (そのまま)</option>
           <option value="720p">720p (HD)</option>
         </select>
         <p className="mt-1.5 text-xs text-muted-foreground">
-          高解像度の動画はサーバー制限のため 720p に制限して出力されます。
+          {loopMode === "crossfade"
+            ? "Crossfade モードでは出力解像度は 480p 固定です（メモリ対策）。"
+            : "高解像度の動画はサーバー制限のため 720p に制限して出力されます。"}
         </p>
       </div>
 
@@ -229,7 +233,7 @@ export default function SettingsPanel({
           value={playbackSpeed}
           onChange={(e) => onPlaybackSpeedChange(Number(e.target.value) as PlaybackSpeed)}
           disabled={disabled}
-          className="w-full px-3 py-2 bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full px-3 py-2.5 sm:py-2 min-h-[44px] sm:min-h-0 bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
         >
           <option value={0.5}>0.5倍速（スロー）</option>
           <option value={1}>1倍速（通常）</option>
@@ -247,7 +251,7 @@ export default function SettingsPanel({
             <label className="block text-sm font-medium mb-2">
               Start Pause (秒): 動き出しの溜め
             </label>
-            <div className="flex gap-4 items-center">
+            <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 sm:items-center">
               <input
                 type="range"
                 min="0"
@@ -256,19 +260,21 @@ export default function SettingsPanel({
                 value={startPauseSeconds}
                 onChange={(e) => onStartPauseChange(Number(e.target.value))}
                 disabled={disabled}
-                className="flex-1 h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
+                className="w-full sm:flex-1 h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary touch-manipulation"
               />
-              <input
-                type="number"
-                min="0"
-                max="10"
-                step="0.1"
-                value={startPauseSeconds}
-                onChange={(e) => onStartPauseChange(Number(e.target.value))}
-                disabled={disabled}
-                className="w-20 px-2 py-1 bg-secondary border border-border rounded text-sm"
-              />
-              <span className="text-xs text-muted-foreground">秒</span>
+              <div className="flex items-center gap-2 shrink-0">
+                <input
+                  type="number"
+                  min="0"
+                  max="10"
+                  step="0.1"
+                  value={startPauseSeconds}
+                  onChange={(e) => onStartPauseChange(Number(e.target.value))}
+                  disabled={disabled}
+                  className="w-20 px-2 py-1.5 sm:py-1 bg-secondary border border-border rounded text-sm min-h-[44px] sm:min-h-0"
+                />
+                <span className="text-xs text-muted-foreground">秒</span>
+              </div>
             </div>
           </div>
 
@@ -276,7 +282,7 @@ export default function SettingsPanel({
             <label className="block text-sm font-medium mb-2">
               End Pause (秒): 動き終わりの余韻
             </label>
-            <div className="flex gap-4 items-center">
+            <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 sm:items-center">
               <input
                 type="range"
                 min="0"
@@ -285,19 +291,21 @@ export default function SettingsPanel({
                 value={endPauseSeconds}
                 onChange={(e) => onEndPauseChange(Number(e.target.value))}
                 disabled={disabled}
-                className="flex-1 h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
+                className="w-full sm:flex-1 h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary touch-manipulation"
               />
-              <input
-                type="number"
-                min="0"
-                max="10"
-                step="0.1"
-                value={endPauseSeconds}
-                onChange={(e) => onEndPauseChange(Number(e.target.value))}
-                disabled={disabled}
-                className="w-20 px-2 py-1 bg-secondary border border-border rounded text-sm"
-              />
-              <span className="text-xs text-muted-foreground">秒</span>
+              <div className="flex items-center gap-2 shrink-0">
+                <input
+                  type="number"
+                  min="0"
+                  max="10"
+                  step="0.1"
+                  value={endPauseSeconds}
+                  onChange={(e) => onEndPauseChange(Number(e.target.value))}
+                  disabled={disabled}
+                  className="w-20 px-2 py-1.5 sm:py-1 bg-secondary border border-border rounded text-sm min-h-[44px] sm:min-h-0"
+                />
+                <span className="text-xs text-muted-foreground">秒</span>
+              </div>
             </div>
           </div>
         </div>

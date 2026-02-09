@@ -104,27 +104,27 @@ export default function Home() {
   }, [processedVideoUrl, selectedFile]);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="container mx-auto px-4 py-8 max-w-6xl">
+    <div className="min-h-screen bg-background text-foreground min-h-[100dvh]">
+      <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-8 max-w-6xl">
         {/* ヘッダー */}
-        <header className="mb-8">
-          <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-primary to-purple-500 bg-clip-text text-transparent">
+        <header className="mb-6 sm:mb-8">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-2 bg-gradient-to-r from-primary to-purple-500 bg-clip-text text-transparent leading-tight">
             VTuber Background Loop Generator
           </h1>
-          <p className="text-muted-foreground">
+          <p className="text-sm sm:text-base text-muted-foreground">
             短い動画クリップを指定した長さまで自然にループさせた背景動画を自動生成
           </p>
         </header>
 
         {/* メインコンテンツ */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
           {/* 左側: アップロード & 設定 */}
-          <div className="space-y-6">
+          <div className="space-y-4 sm:space-y-6">
             {/* 動画アップロードエリア */}
-            <div className="bg-secondary/50 rounded-lg p-6 border border-border">
+            <div className="bg-secondary/50 rounded-lg p-4 sm:p-6 border border-border">
               <div className="flex items-center gap-2 mb-4">
-                <Upload className="w-5 h-5 text-primary" />
-                <h2 className="text-xl font-semibold">動画アップロード</h2>
+                <Upload className="w-5 h-5 text-primary shrink-0" />
+                <h2 className="text-lg sm:text-xl font-semibold">動画アップロード</h2>
               </div>
               <VideoUploadArea
                 onFileSelect={handleFileSelect}
@@ -134,10 +134,10 @@ export default function Home() {
             </div>
 
             {/* 設定パネル */}
-            <div className="bg-secondary/50 rounded-lg p-6 border border-border">
+            <div className="bg-secondary/50 rounded-lg p-4 sm:p-6 border border-border">
               <div className="flex items-center gap-2 mb-4">
-                <Settings className="w-5 h-5 text-primary" />
-                <h2 className="text-xl font-semibold">設定</h2>
+                <Settings className="w-5 h-5 text-primary shrink-0" />
+                <h2 className="text-lg sm:text-xl font-semibold">設定</h2>
               </div>
               <SettingsPanel
                 durationSeconds={durationSeconds}
@@ -162,7 +162,7 @@ export default function Home() {
             <button
               onClick={handleProcess}
               disabled={isProcessing || !selectedFile}
-              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-3 px-6 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="w-full min-h-[44px] sm:min-h-0 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-3 px-6 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 touch-manipulation"
             >
               {isProcessing ? (
                 <>
@@ -187,11 +187,11 @@ export default function Home() {
           </div>
 
           {/* 右側: プレビュー & ダウンロード */}
-          <div className="space-y-6">
-            <div className="bg-secondary/50 rounded-lg p-6 border border-border">
+          <div className="space-y-4 sm:space-y-6">
+            <div className="bg-secondary/50 rounded-lg p-4 sm:p-6 border border-border">
               <div className="flex items-center gap-2 mb-4">
-                <Video className="w-5 h-5 text-primary" />
-                <h2 className="text-xl font-semibold">プレビュー & ダウンロード</h2>
+                <Video className="w-5 h-5 text-primary shrink-0" />
+                <h2 className="text-lg sm:text-xl font-semibold">プレビュー & ダウンロード</h2>
               </div>
               <VideoPreview
                 videoUrl={processedVideoUrl}

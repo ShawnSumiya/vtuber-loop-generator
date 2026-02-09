@@ -50,9 +50,9 @@ export default function VideoPreview({
       </div>
       <button
         onClick={onDownload}
-        className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2"
+        className="w-full min-h-[44px] bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2 touch-manipulation"
       >
-        <Download className="w-5 h-5" />
+        <Download className="w-5 h-5 shrink-0" />
         動画をダウンロード
       </button>
     </div>
