@@ -118,6 +118,7 @@ class VideoProcessor:
                 target_resolution,
                 input_height,
                 speed,
+                input_fps,
             )
         else:
             raise ValueError(f"Unsupported loop mode: {mode}")
@@ -533,6 +534,7 @@ class VideoProcessor:
         target_resolution: str = "Original",
         input_height: int = 0,
         speed: float = 1.0,
+        input_fps: float = 30.0,
     ) -> None:
         """前後をクロスフェードさせたシームレスループ。映像のみ処理し、出力は無音。
         clip_duration は速度変更後の実効尺（xfade offset 計算用）。
@@ -548,7 +550,7 @@ class VideoProcessor:
         # 【重要】メモリ対策: Crossfade 時は常に最初に 480p 相当へリサイズ（scale=854:-2）
         print(f"--- CROSSFADE_LOOP: メモリ対策のため先に 480p へリサイズ (幅{MAX_WIDTH_CROSSFADE}px) ---")
         stream = ffmpeg.input(str(input_path))
-        v = stream["v"].filter("scale", str(MAX_WIDTH_CROSSFADE), "-2")
+        v = stream["v"].filter("scale", MAX_WIDTH_CROSSFADE, -2)
         stream_resized = v
 
         # リサイズ直後に速度変更を適用（setpts）
@@ -556,8 +558,12 @@ class VideoProcessor:
             pts_expr = f"{1.0 / speed}*PTS"
             print(f"--- CROSSFADE_LOOP: 速度変更適用 ({speed}x) ---")
             v = stream_resized.filter("setpts", pts_expr)
+            out_fps = max(1, round(input_fps * speed))
+            v = v.filter("fps", fps=out_fps)
         else:
             v = stream_resized
+            out_fps = max(1, round(input_fps))
+            v = v.filter("fps", fps=out_fps)
 
         v_split = v.filter_multi_output("split", 2)
         v0 = v_split.stream(0).filter("format", "yuv420p").filter("setsar", "1")
