@@ -3,10 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
 from uuid import uuid4
+import logging
 import shutil
 import os
 
 from services.ffmpeg_processor import VideoProcessor, LoopMode
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMP_DIR = BASE_DIR / "temp"
@@ -101,7 +105,7 @@ async def process_video(
             pass
 
     filename = f"looped_{file.filename or 'output.mp4'}"
-    print(f"--- API: 処理完了、ファイル送信開始 ({output_path}) ---", flush=True)
+    logger.info(f"API: 処理完了、ファイル送信開始 ({output_path})")
     return FileResponse(
         path=output_path,
         media_type="video/mp4",
