@@ -622,27 +622,35 @@ class VideoProcessor:
 
         # STEP 4: 0に戻る境界でもクロスフェードする（再生→Crossfade→再生→Crossfade→… を実現）
         # ループ動画の「末尾数秒」と「先頭数秒」を xfade でつなぎ、出力の最後をそのクロスフェードにする。
-        # 再生時: …→末尾付近で tail が head にフェード→ループで先頭→継ぎ目がスムーズになる。
         L = self.get_video_duration(looped_path)
-        if L > 2 * crossfade:
-            logger.info("CROSSFADE_LOOP: STEP 4 - 末尾→先頭のクロスフェードを適用")
+        # mid を取るには crossfade ～ L-2*crossfade の区間が必要なので L > 3*crossfade である必要がある
+        if L > 3 * crossfade:
+            logger.info("CROSSFADE_LOOP: STEP 4 - 末尾→先頭のクロスフェードを適用 (L=%.2fs)", L)
             inp = ffmpeg.input(str(looped_path))
             v = inp["v"]
             v_split = v.filter_multi_output("split", 3)
+            # trim は start+duration で指定（end は環境によって解釈が変わるため避ける）
             head = (
-                v_split.stream(0)
-                .filter("trim", start=0, end=crossfade)
+                v_split[0]
+                .filter("trim", start=0, duration=crossfade)
                 .filter("setpts", "PTS-STARTPTS")
+                .filter("format", "yuv420p")
+                .filter("setsar", "1")
             )
+            mid_duration = L - 3 * crossfade
             mid = (
-                v_split.stream(1)
-                .filter("trim", start=crossfade, end=L - 2 * crossfade)
+                v_split[1]
+                .filter("trim", start=crossfade, duration=mid_duration)
                 .filter("setpts", "PTS-STARTPTS")
+                .filter("format", "yuv420p")
+                .filter("setsar", "1")
             )
             tail = (
                 v_split[2]
-                .filter("trim", start=L - 2 * crossfade, end=L - crossfade)
+                .filter("trim", start=L - 2 * crossfade, duration=crossfade)
                 .filter("setpts", "PTS-STARTPTS")
+                .filter("format", "yuv420p")
+                .filter("setsar", "1")
             )
             tailhead = ffmpeg.filter(
                 [tail, head], "xfade", transition="fade", duration=crossfade, offset=0
@@ -659,7 +667,11 @@ class VideoProcessor:
             logger.info("CROSSFADE_LOOP: STEP 4 - 完了")
         else:
             # 動画が短くて末尾→先頭 xfade を取れない場合はそのままコピー
-            logger.info("CROSSFADE_LOOP: STEP 4 - スキップ（動画が短いため）、ループ動画をそのまま出力")
+            logger.info(
+                "CROSSFADE_LOOP: STEP 4 - スキップ（L=%.2fs <= 3*crossfade=%.2fs）、ループ動画をそのまま出力",
+                L,
+                3 * crossfade,
+            )
             shutil.copy2(looped_path, output_path)
 
         try:
