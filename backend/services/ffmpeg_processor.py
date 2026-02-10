@@ -592,15 +592,36 @@ class VideoProcessor:
         # このサイクルクリップを単純ループして所定時間まで伸ばす（映像のみ、出力無音）
         logger.info("CROSSFADE_LOOP: STEP 3 - ループ生成開始")
         cycle_duration = self.get_video_duration(cycle_path)
-        loop_count = max(1, math.ceil(target_duration / cycle_duration))
-        logger.info(f"CROSSFADE_LOOP: STEP 3 - ループ回数: {loop_count}回")
+        # ★重要★:
+        #   - もともとは target_duration で単純にカットしていたため、
+        #     クロスフェードサイクルの途中で動画が終了し、ファイル末尾→先頭のループ時にカクつきが発生していた。
+        #   - ここでは「クロスフェード済みサイクルの境界」でのみ動画が切れるようにし、
+        #     どのループ境界（…→Crossfade→再生→）でもシームレスになることを優先する。
+        #
+        #   そのため、target_duration に最も近い「サイクル長の整数倍」を実際の出力長とする。
+        if cycle_duration <= 0:
+            raise RuntimeError("Invalid crossfade cycle duration")
+
+        # target_duration / cycle_duration に最も近い整数回数を採用
+        approx_loops = max(1, target_duration / cycle_duration)
+        loop_count = max(1, int(round(approx_loops)))
+        total_duration = cycle_duration * loop_count
+
+        logger.info(
+            "CROSSFADE_LOOP: STEP 3 - ループ回数: %d回 (サイクル長=%.3fs, 目標=%.3fs, 実際の出力長=%.3fs)",
+            loop_count,
+            cycle_duration,
+            target_duration,
+            total_duration,
+        )
 
         loop_input = ffmpeg.input(str(cycle_path), stream_loop=loop_count - 1)
         stream = ffmpeg.output(
             loop_input["v"],
             str(output_path),
             vcodec="copy",
-            t=target_duration,
+            # サイクル境界でのみ終了させることで、末尾→先頭のループ時も Crossfade 済みの継ぎ目になる
+            t=total_duration,
         )
         self.run_ffmpeg_safe(stream, output_path)
         logger.info("CROSSFADE_LOOP: STEP 3 - ループ生成完了")
