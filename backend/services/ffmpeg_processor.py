@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -592,17 +593,9 @@ class VideoProcessor:
         # このサイクルクリップを単純ループして所定時間まで伸ばす（映像のみ、出力無音）
         logger.info("CROSSFADE_LOOP: STEP 3 - ループ生成開始")
         cycle_duration = self.get_video_duration(cycle_path)
-        # ★重要★:
-        #   - もともとは target_duration で単純にカットしていたため、
-        #     クロスフェードサイクルの途中で動画が終了し、ファイル末尾→先頭のループ時にカクつきが発生していた。
-        #   - ここでは「クロスフェード済みサイクルの境界」でのみ動画が切れるようにし、
-        #     どのループ境界（…→Crossfade→再生→）でもシームレスになることを優先する。
-        #
-        #   そのため、target_duration に最も近い「サイクル長の整数倍」を実際の出力長とする。
         if cycle_duration <= 0:
             raise RuntimeError("Invalid crossfade cycle duration")
 
-        # target_duration / cycle_duration に最も近い整数回数を採用
         approx_loops = max(1, target_duration / cycle_duration)
         loop_count = max(1, int(round(approx_loops)))
         total_duration = cycle_duration * loop_count
@@ -615,20 +608,65 @@ class VideoProcessor:
             total_duration,
         )
 
+        # STEP 3 は一時ファイルに出力。STEP 4 で「末尾→先頭」をクロスフェードしてから最終出力する
+        looped_path = self.temp_dir / f"looped_{input_path.stem}.mp4"
         loop_input = ffmpeg.input(str(cycle_path), stream_loop=loop_count - 1)
         stream = ffmpeg.output(
             loop_input["v"],
-            str(output_path),
+            str(looped_path),
             vcodec="copy",
-            # サイクル境界でのみ終了させることで、末尾→先頭のループ時も Crossfade 済みの継ぎ目になる
             t=total_duration,
         )
-        self.run_ffmpeg_safe(stream, output_path)
+        self.run_ffmpeg_safe(stream, looped_path)
         logger.info("CROSSFADE_LOOP: STEP 3 - ループ生成完了")
+
+        # STEP 4: 0に戻る境界でもクロスフェードする（再生→Crossfade→再生→Crossfade→… を実現）
+        # ループ動画の「末尾数秒」と「先頭数秒」を xfade でつなぎ、出力の最後をそのクロスフェードにする。
+        # 再生時: …→末尾付近で tail が head にフェード→ループで先頭→継ぎ目がスムーズになる。
+        L = self.get_video_duration(looped_path)
+        if L > 2 * crossfade:
+            logger.info("CROSSFADE_LOOP: STEP 4 - 末尾→先頭のクロスフェードを適用")
+            inp = ffmpeg.input(str(looped_path))
+            v = inp["v"]
+            v_split = v.filter_multi_output("split", 3)
+            head = (
+                v_split.stream(0)
+                .filter("trim", start=0, end=crossfade)
+                .filter("setpts", "PTS-STARTPTS")
+            )
+            mid = (
+                v_split.stream(1)
+                .filter("trim", start=crossfade, end=L - 2 * crossfade)
+                .filter("setpts", "PTS-STARTPTS")
+            )
+            tail = (
+                v_split[2]
+                .filter("trim", start=L - 2 * crossfade, end=L - crossfade)
+                .filter("setpts", "PTS-STARTPTS")
+            )
+            tailhead = ffmpeg.filter(
+                [tail, head], "xfade", transition="fade", duration=crossfade, offset=0
+            )
+            out = ffmpeg.filter([mid, tailhead], "concat", n=2, v=1, a=0)
+            stream = ffmpeg.output(
+                out,
+                str(output_path),
+                vcodec="libx264",
+                preset="ultrafast",
+                crf=18,
+            )
+            self.run_ffmpeg_safe(stream, output_path)
+            logger.info("CROSSFADE_LOOP: STEP 4 - 完了")
+        else:
+            # 動画が短くて末尾→先頭 xfade を取れない場合はそのままコピー
+            logger.info("CROSSFADE_LOOP: STEP 4 - スキップ（動画が短いため）、ループ動画をそのまま出力")
+            shutil.copy2(looped_path, output_path)
 
         try:
             if cycle_path.exists():
                 cycle_path.unlink()
+            if looped_path.exists():
+                looped_path.unlink()
         except OSError:
             pass
         logger.info("CROSSFADE_LOOP: 完了")
