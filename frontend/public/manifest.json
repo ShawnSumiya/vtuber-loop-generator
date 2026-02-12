@@ -2,7 +2,7 @@
   "name": "Loop Video Generator",
   "short_name": "Loop Gen",
   "description": "シームレスループ動画生成ツール",
-  "theme_color": "#f43f5e",
+  "theme_color": "#4f46e5",
   "background_color": "#0f172a",
   "display": "standalone",
   "start_url": "/",
