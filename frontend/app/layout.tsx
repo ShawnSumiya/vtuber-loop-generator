@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   description: "短い動画クリップを自然にループさせた背景動画を自動生成",
   applicationName: "Loop Video Generator",
   manifest: "/manifest.json",
-  themeColor: "#f43f5e",
+  themeColor: "#4f46e5",
   // Favicon / PWA アイコン設定
   icons: {
     icon: "/favicon.svg",
