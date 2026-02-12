@@ -7,6 +7,7 @@ VTuber向けの背景動画自動ループ生成アプリケーション。短�
 - **Frontend**: Next.js 14 (App Router), TypeScript, Tailwind CSS, Lucide React
 - **Backend**: Python (FastAPI)
 - **Video Processing**: FFmpeg
+- **Infra**: Google Cloud Run, Cloud Storage (GCS)
 
 ## 機能
 
@@ -14,12 +15,14 @@ VTuber向けの背景動画自動ループ生成アプリケーション。短�
 - **3つのループモード**:
   - **Simple Loop**: 単純な繰り返し。最もシンプルで高速
   - **Ping-Pong (Mirror)**: 再生→逆再生→再生... を繰り返す（継ぎ目なし）
-  - **Crossfade (Seamless)**: 動画の前後をクロスフェードさせて自然につなぐ。風景などに最適（**出力は 480p 固定**・メモリ対策のため）
+  - **Crossfade (Seamless)**: 動画の前後をクロスフェードさせて自然につなぐ。風景などに最適。高解像度入力時はサーバー保護のため内部的にダウンスケールされる場合があります。
 - **高度な設定オプション**:
   - **目標の長さ**: 5秒〜1時間（3600秒）まで指定可能
-  - **クロスフェード時間**: Crossfadeモード時に、前後のクロスフェード時間を調整（0.1〜5.0秒）。Crossfade 時は解像度は **480p 固定** です。
+  - **クロスフェード時間**: Crossfadeモード時に、前後のクロスフェード時間を調整（0.1〜5.0秒）。高解像度入力時は内部的にリサイズされる場合があります。
   - **Start Pause**: Simple/Ping-Pongモード時に、動き出しの溜め時間を追加（0〜10秒）
   - **End Pause**: Simple/Ping-Pongモード時に、動き終わりの余韻時間を追加（0〜10秒）
+  - **出力解像度**: Original / 720p / 1080p / 4K から選択可能（一部モード・高解像度入力では 720p などに自動制限されます）
+  - **再生速度**: 0.5x / 1x / 2x を選択可能
 - **プレビュー & ダウンロード**: 処理完了後、生成された動画をプレビューし、ダウンロード可能
 
 ## セットアップ
@@ -56,7 +59,7 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 python main.py
 ```
 
-バックエンドは `http://localhost:8000` で起動します。
+バックエンドは `http://localhost:8080`（`PORT` 未指定時のデフォルト）で起動します。
 
 ### フロントエンドの起動
 
@@ -66,6 +69,9 @@ npm run dev
 ```
 
 フロントエンドは `http://localhost:3000` で起動します。
+
+ローカル開発でバックエンドに接続する場合は、フロントエンド側で `NEXT_PUBLIC_API_URL` を設定してください（例: `http://localhost:8080`）。  
+未指定の場合は、本番用の Cloud Run エンドポイント `https://api-backend-880889120755.asia-northeast1.run.app` に接続します。
 
 ## プロジェクト構成
 
@@ -100,13 +106,18 @@ VTuber-Background-Loop-Generator/
 **リクエストパラメータ:**
 - `file`: 動画ファイル（multipart/form-data）
 - `duration_seconds`: 目標の長さ（秒、整数）
-- `mode`: ループモード（`simple`, `pingpong`, `crossfade`）。`crossfade` のときは出力解像度は 480p 固定
+- `mode`: ループモード（`simple`, `pingpong`, `crossfade`）。`crossfade` のときは出力解像度は高解像度入力時に自動的にダウンスケールされる場合があります。
 - `crossfade_seconds`: クロスフェード時間（秒、浮動小数点数、デフォルト: 1.0）
 - `start_pause_seconds`: 開始時のポーズ時間（秒、浮動小数点数、デフォルト: 0.0）
 - `end_pause_seconds`: 終了時のポーズ時間（秒、浮動小数点数、デフォルト: 0.0）
+- `resolution`: 出力解像度（`Original`, `720p`, `1080p`, `4K`）。不正値や未指定時は `Original` として扱われますが、高解像度入力時は内部的に 720p などに制限される場合があります。
+- `speed`: 再生速度（`0.5`, `1.0`, `2.0`）。不正値や未指定時は `1.0` として扱われます。
 
 **レスポンス:**
-- 成功時: 処理済み動画ファイル（video/mp4）
+- 成功時: JSON  
+  - `status`: `"success"`
+  - `download_url`: 署名付きURL（Cloud Storage 上の動画への一時的なダウンロードURL・有効期限約15分）
+  - `filename`: GCS 上のファイル名
 - エラー時: JSON形式のエラーメッセージ
 
 ### GET `/health`
@@ -116,6 +127,25 @@ VTuber-Background-Loop-Generator/
 ```json
 {"status": "ok"}
 ```
+
+## Cloud Run デプロイ時の IAM 設定
+
+署名付きURLを発行するには、Cloud Run のサービスアカウントに **Service Account Token Creator** ロールを付与する必要があります（IAM signBlob API を使用するため）。
+
+1. **IAM Service Account Credentials API** を有効にする  
+   [API を有効にする](https://console.cloud.google.com/apis/library/iamcredentials.googleapis.com)
+
+2. サービスアカウントに自身への Token Creator ロールを付与する：
+   ```bash
+   # 使用しているサービスアカウントのメールアドレスを指定
+   SA_EMAIL="YOUR-SERVICE-ACCOUNT@YOUR-PROJECT.iam.gserviceaccount.com"
+
+   gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" \
+     --member="serviceAccount:$SA_EMAIL" \
+     --role="roles/iam.serviceAccountTokenCreator"
+   ```
+
+Cloud Run のデフォルトサービスアカウント（`PROJECT_NUMBER-compute@developer.gserviceaccount.com`）を使う場合、上記の `SA_EMAIL` をそれに置き換えて実行してください。
 
 ## 将来の拡張
 

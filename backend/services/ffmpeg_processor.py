@@ -17,10 +17,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-# Crossfade時はメモリ対策のため最初にこの解像度へリサイズ（480p相当・16:9で幅854px）
-MAX_WIDTH_CROSSFADE = 854
-
-
 class LoopMode(str, Enum):
     SIMPLE = "simple"
     PINGPONG = "pingpong"
@@ -77,11 +73,6 @@ class VideoProcessor:
         if target_resolution == "Original" and input_height > 720:
             logger.info(f"PROCESS: 高解像度のため 720p に制限します（入力高さ {input_height}px）")
             target_resolution = "720p"
-
-        # Crossfade時はメモリ対策のため 480p に固定（無料枠などで安定動作させる）
-        if mode == LoopMode.CROSSFade:
-            target_resolution = "480p"
-            logger.info("PROCESS: Crossfade のため解像度を 480p に制限します（メモリ対策）")
 
         # FFmpeg は同期ブロッキングのため、イベントループをブロックしないようスレッドで実行
         if mode == LoopMode.SIMPLE:
@@ -212,8 +203,18 @@ class VideoProcessor:
         if not resolution or not isinstance(resolution, str):
             return "Original"
         r = resolution.strip()
+        # 大文字・小文字の違いを吸収しつつ、既存の "Original" / "720p" / "1080p" / "4K" を優先して扱う
         if r in ("Original", "720p", "1080p", "4K"):
             return r
+        r_lower = r.lower()
+        mapping = {
+            "original": "Original",
+            "720p": "720p",
+            "1080p": "1080p",
+            "4k": "4K",
+        }
+        if r_lower in mapping:
+            return mapping[r_lower]
         return "Original"
 
     def _normalize_speed(self, speed: Optional[float]) -> float:
@@ -287,7 +288,12 @@ class VideoProcessor:
         # 入力は映像ストリームのみ使用（音声は無視）
         stream = ffmpeg.input(str(input_path))
         stream_v = stream["v"]
-        if target_resolution != "Original":
+        if target_resolution == "Original":
+            # オリジナル解像度の場合も、幅・高さが奇数だとエラーになることがあるため
+            # scale=trunc(iw/2)*2:trunc(ih/2)*2 で必ず偶数サイズにそろえる
+            logger.info("SIMPLE_LOOP: Original 解像度のため偶数サイズに揃える scale フィルタを適用")
+            stream_v = stream_v.filter("scale", "trunc(iw/2)*2", "trunc(ih/2)*2")
+        else:
             scale_height = self._scale_height_from_resolution(target_resolution)
             if scale_height is not None:
                 logger.info(f"SIMPLE_LOOP: リサイズ適用 ({target_resolution} -> 高さ{scale_height})")
@@ -402,7 +408,12 @@ class VideoProcessor:
 
         input_video = ffmpeg.input(str(input_path))
         stream_v = input_video["v"]
-        if scale_first:
+        if target_resolution == "Original":
+            # オリジナル解像度の場合も、幅・高さが奇数だとエラーになることがあるため
+            # scale=trunc(iw/2)*2:trunc(ih/2)*2 で必ず偶数サイズにそろえる
+            logger.info("PINGPONG_LOOP: Original 解像度のため偶数サイズに揃える scale フィルタを適用")
+            stream_v = stream_v.filter("scale", "trunc(iw/2)*2", "trunc(ih/2)*2")
+        elif scale_first:
             stream_v = stream_v.filter("scale", "-2", str(scale_height))
         stream_resized = stream_v
 
@@ -544,7 +555,7 @@ class VideoProcessor:
     ) -> None:
         """前後をクロスフェードさせたシームレスループ。映像のみ処理し、出力は無音。
         clip_duration は速度変更後の実効尺（xfade offset 計算用）。
-        メモリ対策のため、Crossfade 時は常に最初に 480p（幅854px）へリサイズしてから xfade する。
+        解像度は target_resolution に従い、'Original' の場合は元の解像度を維持する。
         """
         logger.info("CROSSFADE_LOOP: 開始")
 
@@ -553,10 +564,22 @@ class VideoProcessor:
         offset = max(0.0, clip_duration - crossfade)
         logger.info(f"CROSSFADE_LOOP: STEP 1 - クロスフェード設定 (duration={crossfade}s, offset={offset}s)")
 
-        # 【重要】メモリ対策: Crossfade 時は常に最初に 480p 相当へリサイズ（scale=854:-2）
-        logger.info(f"CROSSFADE_LOOP: メモリ対策のため先に 480p へリサイズ (幅{MAX_WIDTH_CROSSFADE}px)")
+        # 解像度: target_resolution が指定されている場合はその高さにリサイズ
+        scale_height = self._scale_height_from_resolution(target_resolution) if target_resolution != "Original" else None
+        if scale_height is not None and input_height > 0 and scale_height < input_height:
+            logger.info(f"CROSSFADE_LOOP: ダウンスケールのため先にリサイズ ({target_resolution} -> 高さ{scale_height})")
+        elif scale_height is not None:
+            logger.info(f"CROSSFADE_LOOP: リサイズ適用 ({target_resolution} -> 高さ{scale_height})")
+
         stream = ffmpeg.input(str(input_path))
-        v = stream["v"].filter("scale", MAX_WIDTH_CROSSFADE, -2)
+        v = stream["v"]
+        if target_resolution == "Original":
+            # オリジナル解像度の場合も、幅・高さが奇数だとエラーになることがあるため
+            # scale=trunc(iw/2)*2:trunc(ih/2)*2 で必ず偶数サイズにそろえる
+            logger.info("CROSSFADE_LOOP: Original 解像度のため偶数サイズに揃える scale フィルタを適用")
+            v = v.filter("scale", "trunc(iw/2)*2", "trunc(ih/2)*2")
+        elif scale_height is not None:
+            v = v.filter("scale", "-2", str(scale_height))
         stream_resized = v
 
         # リサイズ直後に速度変更を適用（setpts）

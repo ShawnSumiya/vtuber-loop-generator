@@ -24,6 +24,7 @@ interface SettingsPanelProps {
   playbackSpeed: PlaybackSpeed;
   onPlaybackSpeedChange: (value: PlaybackSpeed) => void;
   disabled: boolean;
+  isProUser: boolean;
 }
 
 export default function SettingsPanel({
@@ -42,6 +43,7 @@ export default function SettingsPanel({
   playbackSpeed,
   onPlaybackSpeedChange,
   disabled,
+  isProUser,
 }: SettingsPanelProps) {
   const formatDuration = (seconds: number): string => {
     if (seconds < 60) {
@@ -144,7 +146,7 @@ export default function SettingsPanel({
 
           <button
             onClick={() => onLoopModeChange("pingpong")}
-            disabled={disabled}
+            disabled={disabled || !isProUser}
             className={`p-3 sm:p-4 min-h-[44px] rounded-lg border-2 text-left transition-all touch-manipulation ${
               loopMode === "pingpong"
                 ? "border-primary bg-primary/10"
@@ -154,7 +156,10 @@ export default function SettingsPanel({
             <div className="flex items-center gap-3">
               <ArrowLeftRight className="w-5 h-5 text-primary" />
               <div>
-                <p className="font-medium text-sm">Ping-Pong (Mirror)</p>
+                <p className="font-medium text-sm flex items-center gap-1">
+                  Ping-Pong (Mirror)
+                  {!isProUser && <span className="text-[11px]">🔒 Pro</span>}
+                </p>
                 <p className="text-xs text-muted-foreground mt-1">
                   再生→逆再生→再生... を繰り返す。継ぎ目なし。
                 </p>
@@ -164,7 +169,7 @@ export default function SettingsPanel({
 
           <button
             onClick={() => onLoopModeChange("crossfade")}
-            disabled={disabled}
+            disabled={disabled || !isProUser}
             className={`p-3 sm:p-4 min-h-[44px] rounded-lg border-2 text-left transition-all touch-manipulation ${
               loopMode === "crossfade"
                 ? "border-primary bg-primary/10"
@@ -174,7 +179,10 @@ export default function SettingsPanel({
             <div className="flex items-center gap-3">
               <Sparkles className="w-5 h-5 text-primary" />
               <div>
-                <p className="font-medium text-sm">Crossfade (Seamless)</p>
+                <p className="font-medium text-sm flex items-center gap-1">
+                  Crossfade (Seamless)
+                  {!isProUser && <span className="text-[11px]">🔒 Pro</span>}
+                </p>
                 <p className="text-xs text-muted-foreground mt-1">
                   前後をクロスフェードさせて自然につなぐ。風景などに最適。出力は 480p 固定です。
                 </p>

@@ -1,0 +1,15 @@
+.git
+.gitignore
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+README.md
+# Dockerfile はここから削除しました！
+# 動画ファイルを除外
+*.mp4
+*.mov
+*.avi
+# 一時フォルダを除外
+temp/
+outputs/

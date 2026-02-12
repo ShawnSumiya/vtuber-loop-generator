@@ -1,11 +1,19 @@
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+import datetime
+import os
+import urllib.request
+import shutil
+
+import google.auth
+from google.auth.transport import requests as google_auth_requests
 from pathlib import Path
 from uuid import uuid4
+
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from google.cloud import storage
 import logging
-import shutil
-import os
+import uvicorn
 
 from services.ffmpeg_processor import VideoProcessor, LoopMode
 
@@ -18,23 +26,98 @@ TEMP_DIR.mkdir(exist_ok=True)
 
 app = FastAPI(title="VTuber Background Loop Generator")
 
-# --- CORS設定 ---
-# 許可するオリジンのリスト
-origins = [
-    "http://localhost:3000",                      # ローカル開発用
-    "https://vtuber-loop-generator.vercel.app",   # Vercelの本番URL
-    "*",                                          # ★緊急策: すべて許可（どうしても動かない場合）
-]
+# ---------------------------------------------------
+# 設定：バケット名はプロジェクトIDから自動生成したものを指定
+# ---------------------------------------------------
+BUCKET_NAME = "loop-generator-487117-videos"
 
+# CORS設定
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,        # 許可するリストをセット
-    allow_credentials=True,
-    allow_methods=["*"],          # 全てのメソッド(GET, POSTなど)を許可
-    allow_headers=["*"],          # 全てのヘッダーを許可
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 video_processor = VideoProcessor(temp_dir=TEMP_DIR)
+
+
+def get_current_service_account_email():
+    """Cloud Runのメタデータサーバーから自分のSAメールアドレスを取得する"""
+    try:
+        url = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email"
+        req = urllib.request.Request(url)
+        req.add_header("Metadata-Flavor", "Google")
+        with urllib.request.urlopen(req) as response:
+            return response.read().decode("utf-8").strip()
+    except Exception:
+        # ローカル開発などで取得できない場合はNoneを返す
+        return None
+
+
+def upload_to_gcs_and_get_url(file_path: str, destination_blob_name: str):
+    """
+    ファイルをGCSにアップロードし、IAM signBlob APIを使って署名付きURLを発行する。
+    Cloud Run / Compute Engine では秘密鍵が無いため、access_token と service_account_email を
+    渡して IAM API 経由で署名する。サービスアカウントに roles/iam.serviceAccountTokenCreator
+    の付与が必要。
+    """
+    try:
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(BUCKET_NAME)
+        blob = bucket.blob(destination_blob_name)
+
+        # 1. アップロード
+        print(f"Uploading {file_path} to gs://{BUCKET_NAME}/{destination_blob_name}...")
+        blob.upload_from_filename(file_path)
+
+        # 2. 資格情報を取得し、refresh して access_token を取得（必須）
+        credentials, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        credentials.refresh(google_auth_requests.Request())
+
+        # 3. サービスアカウントのメールアドレスを取得
+        sa_email = None
+        if hasattr(credentials, "service_account_email") and credentials.service_account_email:
+            sa_email = credentials.service_account_email
+        if not sa_email:
+            sa_email = get_current_service_account_email()
+        if not sa_email:
+            sa_email = os.environ.get("SERVICE_ACCOUNT_EMAIL")
+
+        print(f"Signing URL using account: {sa_email}")
+
+        if not sa_email:
+            raise Exception("Service Account Email could not be determined. Cannot sign URL.")
+
+        if not credentials.token:
+            raise Exception(
+                "Access token is not available. "
+                "Ensure IAM Service Account Credentials API is enabled and "
+                "the service account has roles/iam.serviceAccountTokenCreator on itself."
+            )
+
+        # 4. 署名付きURLの発行（IAM signBlob API を使用）
+        # ブラウザに「再生ではなくダウンロードさせたい」ことを伝えるため、
+        # response_disposition で Content-Disposition ヘッダを指定する
+        download_filename = os.path.basename(destination_blob_name) or "download.mp4"
+        url = blob.generate_signed_url(
+            version="v4",
+            expiration=datetime.timedelta(minutes=15),
+            method="GET",
+            service_account_email=sa_email,
+            access_token=credentials.token,  # これがないと秘密鍵エラーになる
+            response_disposition=f'attachment; filename="{download_filename}"',
+        )
+        print(f"Generated signed URL: {url}")
+        return url
+    except Exception as e:
+        print(f"GCS Error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise e
 
 
 @app.post("/process-video")
@@ -48,8 +131,7 @@ async def process_video(
     resolution: str = Form(default="Original"),
     speed: float = Form(1.0),
 ):
-    """アップロードされた動画を指定のモードでループ処理する。"""
-    # 解像度が未送信・空・不正値の場合は Original として扱う（解像度を変えても止まらない）
+    """アップロードされた動画を指定のモードでループ処理し、GCSにアップロードしてURLを返す。"""
     r = (resolution or "").strip() or "Original"
     resolution = r if r in ("Original", "720p", "1080p", "4K") else "Original"
 
@@ -67,7 +149,6 @@ async def process_video(
             content={"detail": f"Invalid mode: {mode}"},
         )
 
-    # 一時ファイルに保存
     input_suffix = Path(file.filename or "input.mp4").suffix or ".mp4"
     input_path = TEMP_DIR / f"input_{uuid4().hex}{input_suffix}"
 
@@ -86,7 +167,6 @@ async def process_video(
             speed=speed,
         )
     except Exception as e:
-        # 失敗時も入力ファイルは削除
         if input_path.exists():
             try:
                 input_path.unlink()
@@ -97,20 +177,40 @@ async def process_video(
             content={"detail": f"Video processing failed: {e}"},
         )
 
-    # 入力ファイルは処理後削除
-    if input_path.exists():
-        try:
-            input_path.unlink()
-        except OSError:
-            pass
+    try:
+        # GCSへアップロード
+        output_filename = output_path.name
+        download_url = upload_to_gcs_and_get_url(
+            str(output_path), f"outputs/{output_filename}"
+        )
 
-    filename = f"looped_{file.filename or 'output.mp4'}"
-    logger.info(f"API: 処理完了、ファイル送信開始 ({output_path})")
-    return FileResponse(
-        path=output_path,
-        media_type="video/mp4",
-        filename=filename,
-    )
+        # 後始末（一時ファイルの削除）
+        if input_path.exists():
+            input_path.unlink()
+        if output_path.exists():
+            output_path.unlink()
+
+        return JSONResponse(content={
+            "status": "success",
+            "download_url": download_url,
+            "filename": output_filename,
+        })
+    except Exception as e:
+        logger.exception("GCS upload or cleanup failed")
+        if input_path.exists():
+            try:
+                input_path.unlink()
+            except OSError:
+                pass
+        if output_path.exists():
+            try:
+                output_path.unlink()
+            except OSError:
+                pass
+        return JSONResponse(
+            status_code=500,
+            content={"detail": str(e)},
+        )
 
 
 @app.get("/health")
@@ -119,6 +219,5 @@ async def health_check():
 
 
 if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)

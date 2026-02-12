@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Upload, Play, Download, Loader2, Video, Settings } from "lucide-react";
 import VideoUploadArea from "@/components/VideoUploadArea";
 import SettingsPanel from "@/components/SettingsPanel";
@@ -23,6 +23,35 @@ export default function Home() {
   const [processedVideoUrl, setProcessedVideoUrl] = useState<string | null>(null);
   const [processedFilename, setProcessedFilename] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [isProUser, setIsProUser] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    // localStorage の既存状態を確認
+    const stored = window.localStorage.getItem("isProUser");
+    if (stored === "true") {
+      setIsProUser(true);
+    }
+
+    // URL クエリから認証トークンを確認
+    const url = new URL(window.location.href);
+    const authToken = url.searchParams.get("auth");
+
+    if (authToken === "v-studio-access-2025") {
+      window.localStorage.setItem("isProUser", "true");
+      setIsProUser(true);
+    }
+
+    // チェック後は URL から auth パラメータを削除
+    if (url.searchParams.has("auth")) {
+      url.searchParams.delete("auth");
+      const query = url.searchParams.toString();
+      const newUrl = url.pathname + (query ? `?${query}` : "") + url.hash;
+      window.history.replaceState({}, "", newUrl);
+    }
+  }, []);
 
   const handleFileSelect = useCallback((file: File) => {
     setSelectedFile(file);
@@ -120,9 +149,16 @@ export default function Home() {
       <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-8 max-w-6xl">
         {/* ヘッダー */}
         <header className="mb-6 sm:mb-8">
-          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-2 bg-gradient-to-r from-primary to-purple-500 bg-clip-text text-transparent leading-tight">
-            VTuber Background Loop Generator
-          </h1>
+          <div className="flex flex-wrap items-center gap-3 mb-2">
+            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold bg-gradient-to-r from-primary to-purple-500 bg-clip-text text-transparent leading-tight">
+              VTuber Background Loop Generator
+            </h1>
+            {isProUser && (
+              <span className="inline-flex items-center rounded-full border border-emerald-400/40 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-400">
+                Pro Plan
+              </span>
+            )}
+          </div>
           <p className="text-sm sm:text-base text-muted-foreground">
             短い動画クリップを指定した長さまで自然にループさせた背景動画を自動生成
           </p>
@@ -167,6 +203,7 @@ export default function Home() {
                 playbackSpeed={playbackSpeed}
                 onPlaybackSpeedChange={setPlaybackSpeed}
                 disabled={isProcessing || !selectedFile}
+                isProUser={isProUser}
               />
             </div>
 

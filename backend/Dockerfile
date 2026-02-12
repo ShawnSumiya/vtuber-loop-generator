@@ -1,21 +1,25 @@
-# Python 3.9の軽量版を使用
-FROM python:3.11-slim
+# ベースイメージ：軽量なPython 3.9
+FROM python:3.10-slim
 
-# FFmpegをインストール (これが重要)
-RUN apt-get update && apt-get install -y ffmpeg
+# システムの依存関係（FFmpeg）をインストール
+# GCR上で動画処理をするために必須です
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
-# 作業ディレクトリを設定
+# 作業ディレクトリの設定
 WORKDIR /app
 
-# 依存ファイルをコピーしてインストール
+# 依存関係ファイルのコピーとインストール
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ソースコードをコピー
+# アプリケーションコードのコピー
 COPY . .
 
-# ポート8000を開放
-EXPOSE 8000
+# Cloud Run はポート番号を環境変数 PORT で渡してくるので、それを受け取る設定
+# デフォルトは 8080
+ENV PORT=8080
 
-# サーバー起動コマンド
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 起動コマンド (uvicornを使用)
+CMD exec uvicorn main:app --host 0.0.0.0 --port ${PORT}
