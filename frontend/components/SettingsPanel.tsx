@@ -8,6 +8,8 @@ type Resolution = "Original" | "720p" | "1080p";
 
 type PlaybackSpeed = 0.5 | 1 | 2;
 
+const PRO_ACCESS_KEY = "LOOP-PRO-2026-C3";
+
 interface SettingsPanelProps {
   durationSeconds: number;
   onDurationChange: (value: number) => void;
@@ -25,6 +27,7 @@ interface SettingsPanelProps {
   onPlaybackSpeedChange: (value: PlaybackSpeed) => void;
   disabled: boolean;
   isProUser: boolean;
+  onUnlockPro: () => void;
 }
 
 export default function SettingsPanel({
@@ -44,6 +47,7 @@ export default function SettingsPanel({
   onPlaybackSpeedChange,
   disabled,
   isProUser,
+  onUnlockPro,
 }: SettingsPanelProps) {
   const formatDuration = (seconds: number): string => {
     if (seconds < 60) {
@@ -52,6 +56,48 @@ export default function SettingsPanel({
     const minutes = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return secs > 0 ? `${minutes}分${secs}秒` : `${minutes}分`;
+  };
+
+  const handleSelectPingPong = () => {
+    if (disabled) return;
+
+    if (isProUser) {
+      onLoopModeChange("pingpong");
+      return;
+    }
+
+    if (typeof window === "undefined") return;
+
+    const input = window.prompt("Pro版キーを入力してください");
+    if (!input) return;
+
+    if (input === PRO_ACCESS_KEY) {
+      onUnlockPro();
+      onLoopModeChange("pingpong");
+    } else {
+      window.alert("キーが正しくありません。");
+    }
+  };
+
+  const handleSelectCrossfade = () => {
+    if (disabled) return;
+
+    if (isProUser) {
+      onLoopModeChange("crossfade");
+      return;
+    }
+
+    if (typeof window === "undefined") return;
+
+    const input = window.prompt("Pro版キーを入力してください");
+    if (!input) return;
+
+    if (input === PRO_ACCESS_KEY) {
+      onUnlockPro();
+      onLoopModeChange("crossfade");
+    } else {
+      window.alert("キーが正しくありません。");
+    }
   };
 
   return (
@@ -145,8 +191,8 @@ export default function SettingsPanel({
           </button>
 
           <button
-            onClick={() => onLoopModeChange("pingpong")}
-            disabled={disabled || !isProUser}
+            onClick={handleSelectPingPong}
+            disabled={disabled}
             className={`p-3 sm:p-4 min-h-[44px] rounded-lg border-2 text-left transition-all touch-manipulation ${
               loopMode === "pingpong"
                 ? "border-primary bg-primary/10"
@@ -168,8 +214,8 @@ export default function SettingsPanel({
           </button>
 
           <button
-            onClick={() => onLoopModeChange("crossfade")}
-            disabled={disabled || !isProUser}
+            onClick={handleSelectCrossfade}
+            disabled={disabled}
             className={`p-3 sm:p-4 min-h-[44px] rounded-lg border-2 text-left transition-all touch-manipulation ${
               loopMode === "crossfade"
                 ? "border-primary bg-primary/10"

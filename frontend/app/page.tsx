@@ -144,6 +144,12 @@ export default function Home() {
     document.body.removeChild(a);
   }, [processedVideoUrl, processedFilename, selectedFile]);
 
+  const handleUnlockPro = useCallback(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("isProUser", "true");
+    setIsProUser(true);
+  }, []);
+
   return (
     <div className="min-h-screen bg-background text-foreground min-h-[100dvh]">
       <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-8 max-w-6xl">
@@ -204,6 +210,7 @@ export default function Home() {
                 onPlaybackSpeedChange={setPlaybackSpeed}
                 disabled={isProcessing || !selectedFile}
                 isProUser={isProUser}
+                onUnlockPro={handleUnlockPro}
               />
             </div>
 
