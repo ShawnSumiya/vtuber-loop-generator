@@ -4,7 +4,7 @@ import { Repeat, ArrowLeftRight, Sparkles } from "lucide-react";
 
 type LoopMode = "simple" | "pingpong" | "crossfade";
 
-type Resolution = "Original" | "720p";
+type Resolution = "Original" | "720p" | "1080p";
 
 type PlaybackSpeed = 0.5 | 1 | 2;
 
@@ -216,11 +216,12 @@ export default function SettingsPanel({
         >
           <option value="Original">Original (そのまま)</option>
           <option value="720p">720p (HD)</option>
+          <option value="1080p">1080p (Full HD)</option>
         </select>
         <p className="mt-1.5 text-xs text-muted-foreground">
           {loopMode === "crossfade"
             ? "Crossfade モードでは出力解像度は 480p 固定です（メモリ対策）。"
-            : "高解像度の動画はサーバー制限のため 720p に制限して出力されます。"}
+            : "高解像度の動画はサーバー制限のため、指定した解像度に制限して出力されます。"}
         </p>
       </div>
 

@@ -7,7 +7,7 @@ import SettingsPanel from "@/components/SettingsPanel";
 import VideoPreview from "@/components/VideoPreview";
 
 type LoopMode = "simple" | "pingpong" | "crossfade";
-type Resolution = "Original" | "720p";
+type Resolution = "Original" | "720p" | "1080p";
 type PlaybackSpeed = 0.5 | 1 | 2;
 
 export default function Home() {
@@ -21,17 +21,20 @@ export default function Home() {
   const [playbackSpeed, setPlaybackSpeed] = useState<PlaybackSpeed>(1);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [processedVideoUrl, setProcessedVideoUrl] = useState<string | null>(null);
+  const [processedFilename, setProcessedFilename] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleFileSelect = useCallback((file: File) => {
     setSelectedFile(file);
     setProcessedVideoUrl(null);
+    setProcessedFilename(null);
     setError(null);
   }, []);
 
   const handleFileRemove = useCallback(() => {
     setSelectedFile(null);
     setProcessedVideoUrl(null);
+    setProcessedFilename(null);
     setError(null);
   }, []);
 
@@ -44,6 +47,7 @@ export default function Home() {
     setIsProcessing(true);
     setError(null);
     setProcessedVideoUrl(null);
+    setProcessedFilename(null);
 
     // 長時間応答がない場合に「処理中」で永久に止まらないようタイムアウト（10分）
     const timeoutMs = 10 * 60 * 1000;
@@ -61,7 +65,9 @@ export default function Home() {
       formData.append("resolution", resolution);
       formData.append("speed", playbackSpeed.toString());
 
-      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const API_BASE_URL =
+        process.env.NEXT_PUBLIC_API_URL ??
+        "https://api-backend-880889120755.asia-northeast1.run.app";
       const response = await fetch(`${API_BASE_URL}/process-video`, {
         method: "POST",
         body: formData,
@@ -75,9 +81,14 @@ export default function Home() {
         throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
       }
 
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      setProcessedVideoUrl(url);
+      const data = await response.json();
+      if (data.status === "success" && data.download_url) {
+        setProcessedVideoUrl(data.download_url);
+        // ダウンロード用のファイル名を保持（handleDownloadで使用）
+        setProcessedFilename(data.filename ?? `looped_${selectedFile.name}`);
+      } else {
+        throw new Error("Invalid response: no download URL");
+      }
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
         setError(
@@ -93,15 +104,16 @@ export default function Home() {
   }, [selectedFile, durationSeconds, loopMode, crossfadeSeconds, startPauseSeconds, endPauseSeconds, resolution, playbackSpeed]);
 
   const handleDownload = useCallback(() => {
-    if (!processedVideoUrl || !selectedFile) return;
+    if (!processedVideoUrl) return;
 
     const a = document.createElement("a");
     a.href = processedVideoUrl;
-    a.download = `looped_${selectedFile.name}`;
+    a.download = processedFilename ?? (selectedFile ? `looped_${selectedFile.name}` : "looped_output.mp4");
+    a.rel = "noopener noreferrer";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-  }, [processedVideoUrl, selectedFile]);
+  }, [processedVideoUrl, processedFilename, selectedFile]);
 
   return (
     <div className="min-h-screen bg-background text-foreground min-h-[100dvh]">
