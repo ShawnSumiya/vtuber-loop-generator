@@ -12,8 +12,8 @@ export const metadata: Metadata = {
   themeColor: "#f43f5e",
   // Favicon / PWA アイコン設定
   icons: {
-    icon: "/favicon.svg",
-    apple: "/favicon.svg",
+    icon: "/pwa-icon.svg",
+    apple: "/pwa-icon.svg",
   },
 };
 

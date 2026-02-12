@@ -8,10 +8,16 @@
   "start_url": "/",
   "icons": [
     {
-      "src": "/favicon.svg?v=2",
-      "sizes": "any",
+      "src": "/pwa-icon.svg",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512",
+      "purpose": "maskable"
     }
   ]
 }
